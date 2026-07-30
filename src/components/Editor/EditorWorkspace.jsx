@@ -1,3 +1,4 @@
+import { usePresets } from "../../hooks/usePresets.js"
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { Segmented } from '../ui/Segmented.jsx'
 import { Section } from '../ui/Section.jsx'
@@ -7,6 +8,7 @@ import { PixIcon } from '../ui/PixIcon.jsx'
 import { ICONS } from '../ui/icons.js'
 import { PixelCanvas } from './PixelCanvas.jsx'
 import { TilePreviewMosaic } from './TilePreviewMosaic.jsx'
+import { JsonImportExport } from './JsonImportExport.jsx'
 import { composeNativeSheet } from '../../core/composeSheet.js'
 import { exportTilesheet } from '../../core/exportSheet.js'
 import { ANIM_FRAME_MS } from '../../core/tilesetDefinition.js'
@@ -36,6 +38,7 @@ const DRAW_TOOLS = [
   { id: 'rectFill',   icon: 'rect',   label: 'RectF' },
   { id: 'eyedropper', icon: 'picker', label: 'Pick' },
 ]
+
 
 // Zoom bounds — shared by the Manual draw canvas and the Procedural sheet
 // (wheel + −/+/Fit), matching the Assets view.
@@ -133,13 +136,15 @@ const OVERRIDE_TOOLS = [
 ]
 
 export function EditorWorkspace({
-  mode, setMode, tileSize, biome, onColorChange, onProceduralParamChange, onResetColors, onShuffleColors,
+  mode, setMode, tileSize, setTileSize, biome, onColorChange, onProceduralParamChange, onResetColors, onShuffleColors,
+  onLoadPreset,
   drawing, tiles, onGenerate, onAITile, onAIProcedural, onAIRecolor, biomeId, savedCount,
   editingTile = null, overrideDraw, overriddenTiles = [],
   onEditTile, onApplyTileEdit, onCancelTileEdit, onResetTileOverride,
   animFrameCount = 1, setAnimFrameCount, canAnimate = false, animFrames = null,
   active = true,
 }) {
+  const { presets, savePreset, removePreset, importPreset } = usePresets()
   const [zoom, setZoom] = useState(() => fitSheetZoom(tileSize))
   const [exportScale, setExportScale] = useState(1)
   const cols = 8
@@ -234,6 +239,49 @@ export function EditorWorkspace({
                 </>
               )}
             </Section>
+
+            <Section title="Preset Library" icon="folder">
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                <Btn size="sm" variant="outline" full onClick={() => {
+                  const name = prompt('Preset name:')
+                  if (name) {
+                    savePreset({ name, biomeId: biome.biomeId || biomeId || biome.id, colors: biome.colors, proceduralParams: biome.proceduralParams })
+                  }
+                }}>Save Current</Btn>
+                <Btn size="sm" variant="outline" full onClick={() => {
+                  const data = prompt('Paste preset JSON:')
+                  if (data) {
+                    try {
+                      const p = JSON.parse(data)
+                      if (p.colors) importPreset(p)
+                    } catch (e) {
+                      alert('Invalid preset data')
+                    }
+                  }
+                }}>Import</Btn>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 150, overflowY: 'auto' }}>
+                {presets.map(p => (
+                  <div key={p.id} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <Btn size="sm" variant="outline" style={{ flex: 1, justifyContent: 'flex-start', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis' }} onClick={() => onLoadPreset && onLoadPreset(p)}>
+                      {p.name || 'Untitled'}
+                    </Btn>
+                    <Btn size="sm" variant="outline" onClick={() => {
+                      const data = JSON.stringify(p)
+                      if (navigator.clipboard) {
+                        navigator.clipboard.writeText(data).then(() => alert('Copied to clipboard!'))
+                      } else {
+                        prompt('Copy this JSON to share:', data)
+                      }
+                    }} title="Copy JSON">Share</Btn>
+                    <Btn size="sm" variant="outline" onClick={() => {
+                      if (confirm('Delete preset?')) removePreset(p.id)
+                    }} title="Delete">X</Btn>
+                  </div>
+                ))}
+                {presets.length === 0 && <div className="hint" style={{ textAlign: 'center' }}>No presets saved.</div>}
+              </div>
+            </Section>
             </>
           )}
 
@@ -297,6 +345,8 @@ export function EditorWorkspace({
                   <li>Check the <b>Tiled preview 3×3</b>.</li>
                 </ul>
               </Section>
+              
+              <JsonImportExport drawing={drawing} tileSize={tileSize} setTileSize={setTileSize} />
             </>
           )}
 

@@ -19,7 +19,7 @@ function AssetThumb({ asset, size = 56 }) {
     const dH = pxH * scale
     const tmp = document.createElement('canvas')
     tmp.width = pxW; tmp.height = pxH
-    tmp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(asset.pixels), pxW, pxH), 0, 0)
+    const expected = pxW * pxH * 4; const data = asset.pixels.length === expected ? asset.pixels : new Uint8ClampedArray(expected); data.set(asset.pixels.subarray(0, Math.min(asset.pixels.length, expected))); tmp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(data), pxW, pxH), 0, 0)
     ctx.drawImage(tmp, (size - dW) / 2, (size - dH) / 2, dW, dH)
   }, [asset, pxW, pxH, size])
 

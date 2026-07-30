@@ -17,7 +17,7 @@ export function TilePreviewMosaic({ pixels, tileSize }) {
     const tmp = document.createElement('canvas')
     tmp.width = tileSize
     tmp.height = tileSize
-    tmp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels), tileSize, tileSize), 0, 0)
+    const expected = tileSize * tileSize * 4; const data = pixels.length === expected ? pixels : new Uint8ClampedArray(expected); data.set(pixels.subarray(0, Math.min(pixels.length, expected))); tmp.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(data), tileSize, tileSize), 0, 0)
 
     for (let ry = 0; ry < REPEAT; ry++) {
       for (let rx = 0; rx < REPEAT; rx++) {

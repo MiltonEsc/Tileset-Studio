@@ -519,7 +519,7 @@ textarea.text-input { resize: vertical; font-family: var(--ui); }
 .level-canvas-wrapper { margin: auto; border: var(--bw) solid var(--line); border-radius: var(--r-card); box-shadow: var(--panel-shadow); overflow: hidden; }
 
 /* ── Level status bar + sidebar toggle (autotile mode) ──────────────────── */
-.level-status-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 6; flex-wrap: wrap; justify-content: center; }
+.level-status-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 6; flex-wrap: wrap; justify-content: center; pointer-events: none; }
 .level-status-pill { background: var(--surface-1); border: var(--bw) solid var(--line); color: var(--ink-dim);
   font-family: var(--mono); font-size: 11px; padding: 4px 10px; border-radius: var(--r-btn); }
 .level-status-notice { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); font-family: var(--ui); }

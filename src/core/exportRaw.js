@@ -14,7 +14,7 @@ function rgbaToCanvas(data, width, height) {
   canvas.height = height
   const ctx = canvas.getContext('2d')
   // Clone so the source buffer is never adopted/detached by ImageData.
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(data), width, height), 0, 0)
+  const expected = width * height * 4; const safeData = data.length === expected ? data : new Uint8ClampedArray(expected); safeData.set(data.subarray(0, Math.min(data.length, expected))); ctx.putImageData(new ImageData(new Uint8ClampedArray(safeData), width, height), 0, 0)
   return canvas
 }
 

@@ -23,7 +23,15 @@ export function useLevels() {
     setError('')
     try {
       const row = await saveLevel(payload)
-      setLevels(prev => [...prev, row])
+      setLevels(prev => {
+        const index = prev.findIndex(l => l.id === row.id)
+        if (index >= 0) {
+          const next = [...prev]
+          next[index] = row
+          return next
+        }
+        return [...prev, row]
+      })
       return row
     } catch (e) {
       setError(e.message)

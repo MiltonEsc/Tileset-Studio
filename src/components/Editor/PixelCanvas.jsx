@@ -12,7 +12,7 @@ export function PixelCanvas({ pixels, tileSize, zoom, onStartStroke, onContinueS
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
-    const imageData = new ImageData(new Uint8ClampedArray(pixels), tileSize, tileSize)
+    const expected = tileSize * tileSize * 4; const data = pixels.length === expected ? pixels : new Uint8ClampedArray(expected); data.set(pixels.subarray(0, Math.min(pixels.length, expected))); const imageData = new ImageData(new Uint8ClampedArray(data), tileSize, tileSize)
     ctx.putImageData(imageData, 0, 0)
   }, [pixels, tileSize])
 

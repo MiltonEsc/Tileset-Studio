@@ -56,7 +56,7 @@ function getAssetCanvas(asset) {
   const ctx = canvas.getContext('2d')
   ctx.imageSmoothingEnabled = false
   const pixels = asset.pixels instanceof Uint8ClampedArray ? asset.pixels : new Uint8ClampedArray(asset.pixels)
-  ctx.putImageData(new ImageData(pixels, width, height), 0, 0)
+  const expected = width * height * 4; const data = pixels.length === expected ? pixels : new Uint8ClampedArray(expected); data.set(pixels.subarray(0, Math.min(pixels.length, expected))); ctx.putImageData(new ImageData(new Uint8ClampedArray(data), width, height), 0, 0)
   propCanvasCache.set(asset, canvas)
   return canvas
 }
@@ -190,6 +190,7 @@ export function LevelsWorkspace({
   onFillActiveLayer, onClearActiveLayer,
   onPlaceProp, onRemovePropAt, onSurprise,
   levels, onSaveLevel, onLoadLevel, onRemoveLevel, levelsLoading = false, levelsError = '',
+  onExportLevel, onImportLevel,
   onTileSizeChange, levelNotice = '',
   tileVariation = false, setTileVariation,
   active = true, smooth = false,
@@ -381,7 +382,7 @@ export function LevelsWorkspace({
             <Btn size="sm" variant="outline" icon="redo" full onClick={level.redo} disabled={!level.canRedo}>Redo</Btn>
           </div>
           <p className="hint" style={{ padding: '4px 18px 0', margin: 0 }}>
-            Shortcuts: Ctrl+Z undo · Ctrl+Y redo · right-click erases / removes a prop · Del removes the selected prop.
+            Shortcuts: Ctrl+Z/Y (Undo/Redo) · Right-click (Erase/Remove) · Del (Remove selected).
           </p>
 
           <Section title="Layers" icon="layers">
@@ -537,21 +538,21 @@ export function LevelsWorkspace({
             )}
           </Section>
 
-          <Section title="Tileset" icon="image">
+          <Section title="Map Settings" icon="settings" defaultOpen={false}>
             <div className="sidebar-inline-label">
               <span className="brush-label">Tile size (paint px)</span>
             </div>
             <Segmented full size="sm" value={tileSize} onChange={onTileSizeChange}
               options={[{ value: 8, label: '8' }, { value: 16, label: '16' }, { value: 32, label: '32' }, { value: 64, label: '64' }]} />
-            <p className="hint" style={{ marginTop: 8 }}>
+            <p className="hint" style={{ marginTop: 8, marginBottom: 16 }}>
               {activeLayer?.tileset
-                ? `Current tileset: ${activeLayer.tileset.name || 'custom'} · ${activeLayer.tileset.tileSize || tileSize}px`
-                : `Using the current editor tileset · ${tileSize}px`}
+                ? `Current: ${activeLayer.tileset.name || 'custom'} · ${activeLayer.tileset.tileSize || tileSize}px`
+                : `Current editor size: ${tileSize}px`}
             </p>
-            <p className="hint">Pick a biome or saved tileset below. Saved tilesets must match the level tile size ({tileSize}px).</p>
-          </Section>
 
-          <Section title="Map size" icon="grid">
+            <div className="sidebar-inline-label">
+              <span className="brush-label">Map size (cells)</span>
+            </div>
             <div className="size-selector-row">
               {SIZE_PRESETS.map(p => (
                 <button key={p.label}
@@ -563,14 +564,30 @@ export function LevelsWorkspace({
               ))}
             </div>
             <div className="export-info"><span>Grid</span><b>{level.width} x {level.height}</b></div>
-            <div className="row-btns">
-              <Btn size="sm" variant="outline" icon="fit" full onClick={onFit}>Fit</Btn>
+            <div className="row-btns" style={{ marginBottom: 16 }}>
+              <Btn size="sm" variant="outline" icon="fit" full onClick={onFit}>Fit to screen</Btn>
             </div>
+
+            <div className="sidebar-inline-label">
+              <span className="brush-label">Options</span>
+            </div>
+            <label className="lib-card-foot" style={{ padding: '6px 0', cursor: 'pointer' }}>
+              <span className="layer-name">Show grid</span>
+              <input type="checkbox" checked={showGrid} onChange={e => setShowGrid(e.target.checked)} />
+            </label>
+            <label className="lib-card-foot" style={{ padding: '6px 0', cursor: 'pointer' }}>
+              <span className="layer-name">Seamless edges</span>
+              <input type="checkbox" checked={level.seamlessEdges} onChange={e => level.setSeamlessEdges(e.target.checked)} />
+            </label>
+            <label className="lib-card-foot" style={{ padding: '6px 0', cursor: 'pointer' }}>
+              <span className="layer-name">Tile variation</span>
+              <input type="checkbox" checked={tileVariation} onChange={e => setTileVariation(e.target.checked)} />
+            </label>
           </Section>
 
           {levelMode === 'autotile' ? (
             <>
-              <Section title="Generate" icon="spark">
+              <Section title="Generate" icon="spark" defaultOpen={false}>
                 <GeneratePanel level={level} onSurprise={onSurprise} />
               </Section>
               <Section title="AI ideas" icon="spark" defaultOpen={false}>
@@ -588,36 +605,23 @@ export function LevelsWorkspace({
             </Section>
           )}
 
-          <Section title="Options" icon="layers" defaultOpen={false}>
-            <label className="lib-card-foot" style={{ padding: '6px 0', cursor: 'pointer' }}>
-              <span className="layer-name">Show grid</span>
-              <input type="checkbox" checked={showGrid} onChange={e => setShowGrid(e.target.checked)} />
-            </label>
-            <label className="lib-card-foot" style={{ padding: '6px 0', cursor: 'pointer' }}>
-              <span className="layer-name">Seamless edges</span>
-              <input type="checkbox" checked={level.seamlessEdges} onChange={e => level.setSeamlessEdges(e.target.checked)} />
-            </label>
-            <p className="hint">Treats the map border as solid, so terrain touching the edge tiles cleanly instead of drawing an outer border.</p>
-            <label className="lib-card-foot" style={{ padding: '6px 0', cursor: 'pointer' }}>
-              <span className="layer-name">Tile variation</span>
-              <input type="checkbox" checked={tileVariation} onChange={e => setTileVariation(e.target.checked)} />
-            </label>
-            <p className="hint">Breaks the repeating look by swapping the fill tile for mirrored variants per cell. Applies to the live view and to exports.</p>
-          </Section>
-
-          <Section title="Save / load level" icon="download" defaultOpen={false}>
-            <div style={{ display: 'flex', gap: 8 }}>
+          <Section title="Save / Export" icon="download" defaultOpen={false}>
+            <div className="sidebar-inline-label">
+              <span className="brush-label">Cloud Storage</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <input className="text-input" value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="Level name" />
               <Btn variant="primary" size="sm" icon="save" onClick={() => { onSaveLevel(saveName.trim() || 'Level'); setSaveName('') }}>Save</Btn>
             </div>
+            
             {levelsError ? (
-              <p className="hint lib-error">Cloud storage error: {levelsError}</p>
+              <p className="hint lib-error">Cloud error: {levelsError}</p>
             ) : levelsLoading ? (
               <p className="hint">Loading saved levels…</p>
             ) : levels.length === 0 ? (
               <p className="hint">No saved levels yet.</p>
             ) : (
-              <div style={{ marginTop: 8 }}>
+              <div style={{ marginBottom: 16 }}>
                 {levels.map(row => (
                   <div key={row.id} className="layer-row" onClick={() => onLoadLevel(row)}>
                     <span className="layer-name">{row.name}</span>
@@ -627,32 +631,34 @@ export function LevelsWorkspace({
                 ))}
               </div>
             )}
-          </Section>
 
-          <Section title="Export" icon="download">
-            <div className="export-info"><span>Output</span><b>{level.width * tileSize} x {level.height * tileSize}px</b></div>
-            <Btn variant="primary" icon="download" full style={{ marginTop: 10 }} onClick={exportLevelPNG}>Export level PNG</Btn>
-            <div className="sidebar-inline-label" style={{ marginTop: 10 }}>
-              <span className="brush-label">For game engines</span>
+            <div className="sidebar-inline-label">
+              <span className="brush-label">Local Files</span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <Btn size="sm" variant="outline" icon="download" onClick={onExportLevel} full>Export JSON</Btn>
+              <label style={{ flex: 1, display: 'flex' }}>
+                <input type="file" accept=".json" style={{ display: 'none' }} onChange={onImportLevel} />
+                <Btn size="sm" variant="outline" icon="folder" style={{ width: '100%', pointerEvents: 'none' }}>Import JSON</Btn>
+              </label>
+            </div>
+
+            <div className="sidebar-inline-label">
+              <span className="brush-label">Game Engines & Image</span>
+            </div>
+            <div className="export-info"><span>Output</span><b>{level.width * tileSize} x {level.height * tileSize}px</b></div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+              <Btn size="sm" variant="primary" icon="download" full onClick={exportLevelPNG}>Export PNG</Btn>
               <Btn size="sm" variant="outline" icon="download" full onClick={() => exportLevelTiled(exportCtx)}>Tiled (.tmj)</Btn>
               <Btn size="sm" variant="outline" icon="download" full onClick={() => exportLevelGodot(exportCtx)}>Godot (.json + .gd)</Btn>
               <Btn size="sm" variant="outline" icon="download" full onClick={() => exportLevelUnity(exportCtx)}>Unity (.json + .cs)</Btn>
             </div>
-            <p className="hint">Engine exports download the map file, an importer script, and the tileset PNG(s) — keep them together. Prop placement is included; prop images are not.</p>
           </Section>
         </div>
       </aside>
 
       <section className="level-canvas-area" ref={levelCanvasAreaRef}>
         <div className="level-status-bar">
-          <span className="level-status-pill">Mode {levelMode}</span>
-          <span className="level-status-pill">Map {level.width}x{level.height}</span>
-          <span className="level-status-pill">Tile {tileSize}px</span>
-          <span className="level-status-pill">Zoom {cellPx}px</span>
-          <span className="level-status-pill">Layer {activeLayer?.name || 'None'}</span>
-          <span className="level-status-pill">Props {level.placedProps.length}</span>
           {levelNotice && <span className="level-status-pill level-status-notice">{levelNotice}</span>}
         </div>
         <button className="sidebar-toggle" onClick={() => setSidebarOpen(o => !o)} title={sidebarOpen ? 'Hide panel' : 'Show panel'}>

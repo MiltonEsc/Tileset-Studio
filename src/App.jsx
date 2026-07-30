@@ -218,6 +218,7 @@ export default function App({ auth = null }) {
   const [tileSize, setTileSize]     = useState(32)
   const [regenerating, setRegenerating] = useState(false) // overlay while high-res tiles rebuild
   const [projectName, setProjectName] = useState('Untitled')
+  const [activeLevelId, setActiveLevelId] = useState(null)
   const [projectModalOpen, setProjectModalOpen] = useState(true) // startup grid picker
   const [mode, setMode]             = useState(() => readUI('mode', 'procedural')) // 'procedural' | 'draw'
   const [levelMode, setLevelMode]   = useState('autotile')   // 'autotile' | 'manual'
@@ -515,9 +516,9 @@ export default function App({ auth = null }) {
           : prev))
       }
     } else if (aiTextures?.center) {
-      const centerData = new ImageData(new Uint8ClampedArray(aiTextures.center), tileSize, tileSize)
+      const centerData = textureToImageData(aiTextures.center, tileSize)
       const edgeData = aiTextures.edge
-        ? new ImageData(new Uint8ClampedArray(aiTextures.edge), tileSize, tileSize)
+        ? textureToImageData(aiTextures.edge, tileSize)
         : null
       tilesheet.generateFromTextures(centerData, edgeData, tileSize, editorTileset.colors, aiTextures.smooth || false)
     } else {
@@ -528,6 +529,23 @@ export default function App({ auth = null }) {
 
   const handleSelectBiome = useCallback((biome) => {
     const fresh = { ...biome, colors: cloneColors(biome.colors) }
+    setEditorTileset(descriptorFromBiome(fresh))
+    setEditorSourceDef({
+      mode: 'procedural',
+      biomeId: fresh.id,
+      label: fresh.label,
+      colors: cloneColors(fresh.colors),
+      proceduralParams: fresh.proceduralParams || {},
+    })
+    setAiTextures(null)
+    setDrawAiMeta(null)
+    clearTileOverrides()
+    tilesheet.generateFromBiome(fresh, tileSize)
+  }, [tileSize, tilesheet, clearTileOverrides])
+
+  const handleLoadPreset = useCallback((preset) => {
+    const base = BIOME_MAP[preset.biomeId] || BIOMES[0]
+    const fresh = { ...base, colors: cloneColors(preset.colors), proceduralParams: preset.proceduralParams || {} }
     setEditorTileset(descriptorFromBiome(fresh))
     setEditorSourceDef({
       mode: 'procedural',
@@ -600,8 +618,8 @@ export default function App({ auth = null }) {
   const handleAIProcedural = useCallback((centerPixels, edgePixels, result) => {
     const center = new Uint8ClampedArray(centerPixels)
     const edge   = edgePixels ? new Uint8ClampedArray(edgePixels) : null
-    const centerData = new ImageData(center, tileSize, tileSize)
-    const edgeData   = edge ? new ImageData(edge, tileSize, tileSize) : null
+    const centerData = textureToImageData(center, tileSize)
+    const edgeData   = edge ? textureToImageData(edge, tileSize) : null
     // A "smooth" (non-pixel) import keeps full colour and renders un-pixelated.
     const smooth = result?.center?.meta?.smooth || false
     // Reflect the AI material in the palette swatches (and the saved colors)
@@ -725,8 +743,8 @@ export default function App({ auth = null }) {
       setMode('draw')
       setAiTextures(null)
       const bytes = base64ToBytes(def.basePixels)
-      const side = Math.round(Math.sqrt(bytes.length / 4))
-      if (generate) tilesheet.generateFromBitmap(new ImageData(new Uint8ClampedArray(bytes), side, side), size)
+      const bmp = textureToImageData(bytes, size)
+      if (generate) tilesheet.generateFromBitmap(bmp, size)
       const inferred = def.colors || inferColorsFromTiles(tilesFromDefinition(def, size)) || BIOMES[0].colors
       setEditorTileset(createEditorTilesetDescriptor({
         name: def.label || 'Drawn tileset',
@@ -897,9 +915,10 @@ export default function App({ auth = null }) {
     tileSize,
   ])
 
-  const handleSaveLevel = useCallback((name) => {
+  const handleSaveLevel = useCallback(async (name) => {
     if (!level.layers.length) return
-    levels.save({
+    const row = await levels.save({
+      id: activeLevelId,
       name, width: level.width, height: level.height, tileSize,
       layers: level.layers.map(layer => {
         const manualOut = new Uint8ClampedArray(layer.manualTiles.length)
@@ -917,7 +936,11 @@ export default function App({ auth = null }) {
       placedProps: level.placedProps,
       seamlessEdges: level.seamlessEdges,
     })
-  }, [levels, level, tileSize])
+    if (row) {
+      setActiveLevelId(row.id)
+      setProjectName(row.name)
+    }
+  }, [levels, level, tileSize, activeLevelId])
 
   const handleLoadLevel = useCallback((row) => {
     const size = row.tile_size || tileSize
@@ -951,7 +974,62 @@ export default function App({ auth = null }) {
     level.loadState({ width: row.width, height: row.height, layers: loadedLayers, placedProps: row.placed_props })
     level.setSeamlessEdges(!!row.seamless_edges)
     setSelectedPropId(null)
+    setActiveLevelId(row.id)
+    setProjectName(row.name)
   }, [drawing, applyTilesetDefinition, level, tileSize])
+
+  const handleExportLevel = useCallback(() => {
+    if (!level.layers.length) return
+    const payload = {
+      name: projectName,
+      width: level.width,
+      height: level.height,
+      tile_size: tileSize, // export format matches DB format
+      layers: level.layers.map(layer => {
+        const manualOut = new Uint8ClampedArray(layer.manualTiles.length)
+        for (let i = 0; i < layer.manualTiles.length; i++) manualOut[i] = layer.manualTiles[i] + 1
+        return {
+          id: layer.id,
+          name: layer.name,
+          kind: layer.kind || 'autotile',
+          visible: layer.visible !== false,
+          tileset: layer.tileset,
+          gridB64: bytesToBase64(layer.grid),
+          manualTilesB64: bytesToBase64(manualOut),
+        }
+      }),
+      placed_props: level.placedProps,
+      seamless_edges: level.seamlessEdges,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${projectName.replace(/\s+/g, '_')}_project.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }, [level, tileSize, projectName])
+
+  const handleImportLevel = useCallback((e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      try {
+        const row = JSON.parse(event.target.result)
+        // Set id to null so it's loaded as a new project
+        row.id = null
+        handleLoadLevel(row)
+        setActiveLevelId(null) // clear active level ID so it's unlinked from DB until saved
+      } catch (err) {
+        alert('Invalid project file')
+      }
+    }
+    reader.readAsText(file)
+    e.target.value = '' // reset input
+  }, [handleLoadLevel])
 
   const handleSurprise = useCallback(() => {
     const keys = Object.keys(GENERATORS)
@@ -1185,9 +1263,10 @@ export default function App({ auth = null }) {
 
       <div className={`view-pane ${showTileset ? '' : 'view-hidden'}`}>
         <EditorWorkspace
-          mode={mode} setMode={setMode} tileSize={tileSize}
+          mode={mode} setMode={setMode} tileSize={tileSize} setTileSize={setTileSize}
           biome={editorTileset} onColorChange={handleColorChange}
           onProceduralParamChange={handleProceduralParamChange}
+          onLoadPreset={handleLoadPreset}
           onResetColors={handleResetBiomeColors} onShuffleColors={handleShuffleBiomeColors}
           drawing={drawing} tiles={displayTiles}
           onGenerate={handleGenerate} onAITile={handleAITile} onAIProcedural={handleAIProcedural}
@@ -1239,6 +1318,7 @@ export default function App({ auth = null }) {
               onFillActiveLayer={handleFillActiveLayer} onClearActiveLayer={handleClearActiveLayer}
               onSurprise={handleSurprise}
               levels={levels.levels} onSaveLevel={handleSaveLevel} onLoadLevel={handleLoadLevel} onRemoveLevel={levels.remove}
+              onExportLevel={handleExportLevel} onImportLevel={handleImportLevel}
               levelsLoading={levels.loading} levelsError={levels.error}
               onTileSizeChange={handleTileSizeChange} levelNotice={levelNotice}
               tileVariation={tileVariation} setTileVariation={setTileVariation}

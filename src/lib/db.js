@@ -66,16 +66,28 @@ export async function listLevels() {
   return unwrap(await sb.from('levels').select('*').order('created_at', { ascending: true }))
 }
 
-export async function saveLevel({ name, width, height, tileSize, layers, placedProps, seamlessEdges }) {
+export async function saveLevel({ id, name, width, height, tileSize, layers, placedProps, seamlessEdges }) {
   const sb = requireClient(await getSupabase())
-  const rows = unwrap(await sb.from('levels')
-    .insert({
-      name, width, height, tile_size: tileSize,
-      layers: layers ?? null,
-      placed_props: placedProps, seamless_edges: seamlessEdges,
-    })
-    .select())
-  return rows[0]
+  
+  const payload = {
+    name, width, height, tile_size: tileSize,
+    layers: layers ?? null,
+    grid: '', // fallback for legacy not-null constraints
+    placed_props: placedProps, seamless_edges: seamlessEdges,
+  }
+
+  if (id) {
+    const rows = unwrap(await sb.from('levels')
+      .update(payload)
+      .eq('id', id)
+      .select())
+    return rows[0]
+  } else {
+    const rows = unwrap(await sb.from('levels')
+      .insert(payload)
+      .select())
+    return rows[0]
+  }
 }
 
 export async function removeLevel(id) {

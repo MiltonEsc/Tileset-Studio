@@ -64,7 +64,7 @@ function transformInterior(src, size, mode) {
 // Builds `count` variant ImageData from the fill tile. Returns [] if no fill tile
 // (or it's too small to vary safely).
 export function makeFillVariants(fillTile, size, count = VARIANT_COUNT) {
-  if (!fillTile?.data || size < 4) return []
+  if (!fillTile?.data || size < 4 || fillTile.width !== size || fillTile.height !== size) return []
   const variants = []
   for (let v = 0; v < count; v++) {
     variants.push(transformInterior(fillTile, size, VARIANT_MODES[v % VARIANT_MODES.length]))

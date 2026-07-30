@@ -21,7 +21,7 @@ export function AssetCanvas({
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, width, height)
-    const imageData = new ImageData(new Uint8ClampedArray(pixels), width, height)
+    const expected = width * height * 4; const data = pixels.length === expected ? pixels : new Uint8ClampedArray(expected); data.set(pixels.subarray(0, Math.min(pixels.length, expected))); const imageData = new ImageData(new Uint8ClampedArray(data), width, height)
     ctx.putImageData(imageData, 0, 0)
   }, [pixels, width, height])
 

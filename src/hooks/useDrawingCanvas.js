@@ -70,6 +70,11 @@ export function useDrawingCanvas(tileSize) {
       next[idx] = new Uint8ClampedArray(pixels)
       return next
     })
+    
+    const recoveredSize = Math.round(Math.sqrt(prevState.length / 4))
+    currentTileSize.current = recoveredSize
+    setZoom(defaultZoom(recoveredSize))
+    
     setPixels(new Uint8ClampedArray(prevState))
     setHistoryIndex(i => i - 1)
   }, [history, historyIndex, pixels])
@@ -84,6 +89,11 @@ export function useDrawingCanvas(tileSize) {
       next[idx] = new Uint8ClampedArray(pixels)
       return next
     })
+    
+    const recoveredSize = Math.round(Math.sqrt(nextState.length / 4))
+    currentTileSize.current = recoveredSize
+    setZoom(defaultZoom(recoveredSize))
+
     setPixels(new Uint8ClampedArray(nextState))
     setHistoryIndex(i => i + 1)
   }, [history, historyIndex, pixels])
@@ -152,16 +162,41 @@ export function useDrawingCanvas(tileSize) {
     }
   }, [tool, preview])
 
-  // Replace the canvas content (e.g. from an AI-generated tile)
-  const loadPixels = useCallback((data) => {
+  const resizeCanvas = useCallback((newSize) => {
     pushHistory(pixels)
+    const newData = makeBlankPixels(newSize)
+    const oldSize = currentTileSize.current
+    const minSize = Math.min(oldSize, newSize)
+    for (let y = 0; y < minSize; y++) {
+      for (let x = 0; x < minSize; x++) {
+        const dIdx = (y * newSize + x) * 4
+        const sIdx = (y * oldSize + x) * 4
+        newData[dIdx] = pixels[sIdx]
+        newData[dIdx+1] = pixels[sIdx+1]
+        newData[dIdx+2] = pixels[sIdx+2]
+        newData[dIdx+3] = pixels[sIdx+3]
+      }
+    }
+    currentTileSize.current = newSize
+    setPixels(newData)
+    setPreview(null)
+    setZoom(defaultZoom(newSize))
+  }, [pixels, pushHistory])
+
+  // Replace the canvas content (e.g. from an AI-generated tile or JSON import)
+  const loadPixels = useCallback((data, newSize = null) => {
+    pushHistory(pixels)
+    if (newSize) {
+      currentTileSize.current = newSize
+      setZoom(defaultZoom(newSize))
+    }
     setPixels(new Uint8ClampedArray(data))
     setPreview(null)
   }, [pixels, pushHistory])
 
   const getImageData = useCallback(() => {
     const size = currentTileSize.current
-    return new ImageData(new Uint8ClampedArray(pixels), size, size)
+    const expected = size * size * 4; const data = pixels.length === expected ? pixels : new Uint8ClampedArray(expected); data.set(pixels.subarray(0, Math.min(pixels.length, expected))); return new ImageData(new Uint8ClampedArray(data), size, size)
   }, [pixels])
 
   const clear = useCallback(() => {
@@ -180,6 +215,7 @@ export function useDrawingCanvas(tileSize) {
     startStroke, continueStroke, endStroke,
     undo, redo,
     resetCanvas,
+    resizeCanvas,
     clear,
     loadPixels,
     getImageData,
