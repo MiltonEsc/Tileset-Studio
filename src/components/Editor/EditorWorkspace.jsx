@@ -198,47 +198,53 @@ export function EditorWorkspace({
                   <Btn size="sm" variant="outline" icon="reset" full onClick={onResetColors}>Reset</Btn>
                 </div>
               </Section>
-              <Section title="Border Style" icon="grid">
-                <label className="field-label">Edge Thickness</label>
-                <input
-                  type="range"
-                  min="1"
-                  max={Math.max(4, Math.floor(tileSize / 2))}
-                  value={biome.proceduralParams?.edgeWidth ?? Math.max(2, Math.round(tileSize / 6))}
-                  onChange={e => onProceduralParamChange?.('edgeWidth', parseInt(e.target.value, 10))}
-                  className="slider"
+              <Section title="Generator Settings" icon="grid">
+                <label className="field-label">Engine</label>
+                <Segmented
+                  full
+                  size="sm"
+                  value={biome.proceduralParams?.engine ?? 'default'}
+                  onChange={v => onProceduralParamChange?.('engine', v)}
+                  options={[{ value: 'default', label: 'Default' }, { value: 'spritecook', label: 'SpriteCook' }]}
                 />
-                <label className="field-label" style={{ marginTop: 12 }}>Edge Noise</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="200"
-                  value={Math.round((biome.proceduralParams?.edgeNoise ?? 1.0) * 100)}
-                  onChange={e => onProceduralParamChange?.('edgeNoise', parseInt(e.target.value, 10) / 100)}
-                  className="slider"
-                />
-                <label className="field-label" style={{ marginTop: 12 }}>Edge Jitter</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="300"
-                  value={Math.round((biome.proceduralParams?.edgeJitter ?? 1.0) * 100)}
-                  onChange={e => onProceduralParamChange?.('edgeJitter', parseInt(e.target.value, 10) / 100)}
-                  className="slider"
-                />
-              {!biome.isCustom && (
-                <>
-                  <label className="field-label" style={{ marginTop: 12 }}>Corner Style</label>
-                  <Segmented
-                    full
-                    size="sm"
-                    value={biome.proceduralParams?.cornerStyle ?? 'sharp'}
-                    onChange={v => onProceduralParamChange?.('cornerStyle', v)}
-                    options={[{ value: 'sharp', label: 'Sharp' }, { value: 'rounded', label: 'Round' }, { value: 'organic', label: 'Organic' }]}
-                  />
-                </>
-              )}
-            </Section>
+                
+                {biome.proceduralParams?.engine === 'spritecook' ? (
+                  <>
+                    <label className="field-label" style={{ marginTop: 12 }}>Padding</label>
+                    <input type="range" min="0" max={Math.floor(tileSize / 3)} value={biome.proceduralParams?.padding ?? 1} onChange={e => onProceduralParamChange?.('padding', parseInt(e.target.value, 10))} className="slider" />
+                    
+                    <label className="field-label" style={{ marginTop: 12 }}>Corner Radius</label>
+                    <input type="range" min="0" max={Math.floor(tileSize / 2)} value={biome.proceduralParams?.cornerRadius ?? Math.floor(tileSize * 0.2)} onChange={e => onProceduralParamChange?.('cornerRadius', parseInt(e.target.value, 10))} className="slider" />
+                    
+                    <label className="field-label" style={{ marginTop: 12 }}>Edge Noise</label>
+                    <input type="range" min="0" max="100" value={Math.round((biome.proceduralParams?.edgeNoise ?? 2.0) * 20)} onChange={e => onProceduralParamChange?.('edgeNoise', parseInt(e.target.value, 10) / 20)} className="slider" />
+                    
+                    <label className="field-label" style={{ marginTop: 12 }}>Texture Noise</label>
+                    <input type="range" min="0" max="100" value={Math.round((biome.proceduralParams?.textureNoise ?? 0.1) * 200)} onChange={e => onProceduralParamChange?.('textureNoise', parseInt(e.target.value, 10) / 200)} className="slider" />
+                    
+                    <label className="field-label" style={{ marginTop: 12 }}>Flecks</label>
+                    <input type="range" min="0" max="100" value={Math.round((biome.proceduralParams?.flecks ?? 0.05) * 400)} onChange={e => onProceduralParamChange?.('flecks', parseInt(e.target.value, 10) / 400)} className="slider" />
+                  </>
+                ) : (
+                  <>
+                    <label className="field-label" style={{ marginTop: 12 }}>Edge Thickness</label>
+                    <input type="range" min="1" max={Math.max(4, Math.floor(tileSize / 2))} value={biome.proceduralParams?.edgeWidth ?? Math.max(2, Math.round(tileSize / 6))} onChange={e => onProceduralParamChange?.('edgeWidth', parseInt(e.target.value, 10))} className="slider" />
+                    
+                    <label className="field-label" style={{ marginTop: 12 }}>Edge Noise</label>
+                    <input type="range" min="0" max="200" value={Math.round((biome.proceduralParams?.edgeNoise ?? 1.0) * 100)} onChange={e => onProceduralParamChange?.('edgeNoise', parseInt(e.target.value, 10) / 100)} className="slider" />
+                    
+                    <label className="field-label" style={{ marginTop: 12 }}>Edge Jitter</label>
+                    <input type="range" min="0" max="300" value={Math.round((biome.proceduralParams?.edgeJitter ?? 1.0) * 100)} onChange={e => onProceduralParamChange?.('edgeJitter', parseInt(e.target.value, 10) / 100)} className="slider" />
+                    
+                    {!biome.isCustom && (
+                      <>
+                        <label className="field-label" style={{ marginTop: 12 }}>Corner Style</label>
+                        <Segmented full size="sm" value={biome.proceduralParams?.cornerStyle ?? 'sharp'} onChange={v => onProceduralParamChange?.('cornerStyle', v)} options={[{ value: 'sharp', label: 'Sharp' }, { value: 'rounded', label: 'Round' }, { value: 'organic', label: 'Organic' }]} />
+                      </>
+                    )}
+                  </>
+                )}
+              </Section>
 
             <Section title="Preset Library" icon="folder">
               <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>

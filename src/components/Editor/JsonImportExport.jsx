@@ -4,6 +4,7 @@ import { Section } from '../ui/Section.jsx'
 import { Segmented } from '../ui/Segmented.jsx'
 import { PixIcon } from '../ui/PixIcon.jsx'
 import { ICONS } from '../ui/icons.js'
+import { generateText } from '../../core/aiText.js'
 import {
   validateTileJson,
   validateSeamlessEdges,
@@ -21,6 +22,11 @@ export function JsonImportExport({ drawing, tileSize, setTileSize }) {
   const [pasteText, setPasteText] = useState('')
   const [validationResult, setValidationResult] = useState(null)
   
+  const [aiModalOpen, setAiModalOpen] = useState(false)
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState('')
+
   const fileInputRef = useRef(null)
 
   // Sync parent tileSize if undo/redo changes the underlying pixel array size
@@ -96,6 +102,53 @@ export function JsonImportExport({ drawing, tileSize, setTileSize }) {
     alert("JSON copied to clipboard!")
   }
   
+  const handleAIGenerate = async () => {
+    if (!aiPrompt.trim()) return
+    setAiLoading(true)
+    setAiError('')
+    try {
+      const systemPrompt = `You are an expert pixel art AI.
+Return ONLY valid JSON. Do NOT include markdown code blocks.
+The JSON must follow this precise schema:
+{
+  "version": 1,
+  "type": "pixel-tile",
+  "name": "a descriptive name based on the prompt",
+  "size": ${tileSize},
+  "width": ${tileSize},
+  "height": ${tileSize},
+  "palette": ["#RRGGBB", ...], // Up to 12 colors
+  "data": [[0, 1, ...], ...] // 2D array of integers (${tileSize}x${tileSize}). Each integer is an index in the palette.
+}
+Ensure the tile is visually interesting, repeats seamlessly (the top edge matches the bottom edge, left matches right), and fits the prompt.
+The dimensions must be exactly ${tileSize}x${tileSize}.
+Do not output anything else but the raw JSON.`
+
+      // "gemini-3.5-flash" matches the AI suggestion for general fast tasks
+      const text = await generateText({ prompt: aiPrompt, system: systemPrompt, model: 'gemini-3.5-flash' })
+      const cleanText = text.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim()
+      
+      const res = validateTileJson(cleanText)
+      if (!res.valid) {
+        setAiError('Generated JSON was invalid: ' + res.errors.join(', '))
+        return
+      }
+      
+      const tile = res.tile
+      if (tile.size !== tileSize && setTileSize) {
+        setTileSize(tile.size)
+      }
+      const pixels = matrixToPixels(tile.data, tile.palette)
+      drawing.loadPixels(pixels, tile.size)
+      setAiModalOpen(false)
+      setAiPrompt('')
+    } catch (err) {
+      setAiError(err.message || 'Generation failed.')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
   const handleFixEdges = () => {
     if (validationResult?.success && validationResult.tile) {
       const fixedData = enforceSeamlessEdges(validationResult.tile.data)
@@ -151,6 +204,9 @@ export function JsonImportExport({ drawing, tileSize, setTileSize }) {
       <div className="row-btns" style={{ marginTop: 8 }}>
         <Btn size="sm" variant="outline" icon="download" full onClick={handleExport}>Export JSON</Btn>
         <Btn size="sm" variant="outline" icon="copy" full onClick={handleCopy}>Copy JSON</Btn>
+      </div>
+      <div className="row-btns" style={{ marginTop: 8 }}>
+        <Btn size="sm" variant="outline" icon="spark" full onClick={() => setAiModalOpen(true)}>Generate with AI</Btn>
       </div>
 
       <div style={{ marginTop: 12, padding: 8, background: 'var(--bg-inset)', borderRadius: 4, fontSize: 13 }}>
@@ -277,6 +333,60 @@ export function JsonImportExport({ drawing, tileSize, setTileSize }) {
                 onClick={() => validationResult?.success && doImport(validationResult.tile)}
               >
                 {validationResult?.success && !validationResult.seamless ? 'Import anyway' : 'Import'}
+              </Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {aiModalOpen && (
+        <div className="modal-backdrop" style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+          <div className="modal-content" style={{
+            background: 'var(--bg)',
+            padding: 24,
+            borderRadius: 8,
+            width: 400,
+            maxWidth: '90vw',
+          }}>
+            <h2 style={{ margin: '0 0 8px 0', fontSize: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <PixIcon name="spark" /> AI JSON Tile
+            </h2>
+            <p style={{ margin: '0 0 16px 0', fontSize: 13, color: 'var(--ink-dim)' }}>
+              Describe a seamless tile (e.g. "lava rocks", "water"). Gemini will generate the JSON directly.
+            </p>
+            
+            <textarea 
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder="A magical forest floor with glowing mushrooms..."
+              disabled={aiLoading}
+              style={{
+                width: '100%',
+                height: 100,
+                fontFamily: 'inherit',
+                padding: 12,
+                borderRadius: 4,
+                border: '1px solid var(--border)',
+                background: 'var(--bg-inset)',
+                color: 'var(--ink)',
+                marginBottom: 16
+              }}
+            />
+            
+            {aiError && (
+              <div style={{ padding: 12, borderRadius: 4, background: 'var(--bg-danger)', color: 'var(--accent-danger)', fontSize: 13, marginBottom: 16 }}>
+                {aiError}
+              </div>
+            )}
+            
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <Btn variant="outline" onClick={() => { setAiModalOpen(false); setAiPrompt(''); setAiError('') }} disabled={aiLoading}>Cancel</Btn>
+              <Btn variant="primary" onClick={handleAIGenerate} disabled={aiLoading || !aiPrompt.trim()}>
+                {aiLoading ? 'Generating...' : 'Generate Tile'}
               </Btn>
             </div>
           </div>

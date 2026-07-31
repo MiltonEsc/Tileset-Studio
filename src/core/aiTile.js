@@ -18,16 +18,16 @@ export const DITHER_OPTIONS = [
 const DEFAULT_DITHER = 'nearest'
 const QUANT_FORMULA = 'euclidean-bt709'
 // Exported so the text-generation path (aiText.js) reuses the same dev proxies.
-export const GEMINI_BASE = import.meta.env?.DEV ? '/gemini/v1beta' : 'https://generativelanguage.googleapis.com/v1beta'
-export const OPENAI_BASE = import.meta.env?.DEV ? '/openai/v1' : 'https://api.openai.com/v1'
+export const GEMINI_BASE = import.meta.env.DEV ? '/gemini/v1beta' : 'https://generativelanguage.googleapis.com/v1beta'
+export const OPENAI_BASE = import.meta.env.DEV ? '/openai/v1' : 'https://api.openai.com/v1'
 // fal.ai (FLUX). Synchronous endpoint: POST /<model> returns the image inline
 // (a data-URI) when sync_mode is set, so no polling / CDN-CORS handling needed.
-export const FAL_BASE = import.meta.env?.DEV ? '/fal' : 'https://fal.run'
+export const FAL_BASE = import.meta.env.DEV ? '/fal' : 'https://fal.run'
 // Cloudflare Workers AI (Stable Diffusion XL). POST /accounts/<id>/ai/run/<model>
 // returns the PNG as RAW BINARY (not base64/JSON) — handled via blob + object-URL.
-export const CLOUDFLARE_BASE = import.meta.env?.DEV ? '/cloudflare/client/v4' : 'https://api.cloudflare.com/client/v4'
+export const CLOUDFLARE_BASE = import.meta.env.DEV ? '/cloudflare/client/v4' : 'https://api.cloudflare.com/client/v4'
 // Recraft V3. OpenAI-compatible images endpoint; request b64_json to skip the CDN.
-export const RECRAFT_BASE = import.meta.env?.DEV ? '/recraft' : 'https://external.api.recraft.com'
+export const RECRAFT_BASE = import.meta.env.DEV ? '/recraft' : 'https://external.api.recraft.com'
 const DEFAULT_IMAGE_MODEL = 'gemini-2.5-flash-image'
 const FALLBACK_IMAGE_MODEL = 'gemini-2.5-flash-image'
 const DEFAULT_QUALITY = 'high'

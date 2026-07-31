@@ -17,8 +17,13 @@ export function providerForTextModel(model) {
 async function readError(res, provider) {
   let msg = `${provider === 'openai' ? 'OpenAI' : 'Gemini'} text request failed (HTTP ${res.status}).`
   try {
-    const err = await res.json()
-    if (err?.error?.message) msg = err.error.message
+    const text = await res.text()
+    try {
+      const err = JSON.parse(text)
+      if (err?.error?.message) msg = err.error.message
+    } catch {
+      if (text.includes('<html')) msg += ' Received HTML instead of JSON.'
+    }
   } catch {
     // ignore
   }
@@ -36,7 +41,15 @@ async function geminiText(apiKey, model, prompt, system, temperature) {
     }),
   })
   if (!res.ok) throw new Error(await readError(res, 'gemini'))
-  const json = await res.json()
+  
+  const text = await res.text()
+  let json
+  try {
+    json = JSON.parse(text)
+  } catch (err) {
+    throw new Error(`Failed to parse Gemini response as JSON: ${err.message}`)
+  }
+  
   const parts = json?.candidates?.[0]?.content?.parts || []
   return parts.map(p => p.text).filter(Boolean).join('')
 }
@@ -56,7 +69,15 @@ async function openaiText(apiKey, model, prompt, system, temperature) {
     }),
   })
   if (!res.ok) throw new Error(await readError(res, 'openai'))
-  const json = await res.json()
+  
+  const text = await res.text()
+  let json
+  try {
+    json = JSON.parse(text)
+  } catch (err) {
+    throw new Error(`Failed to parse OpenAI response as JSON: ${err.message}`)
+  }
+  
   return json?.choices?.[0]?.message?.content || ''
 }
 
