@@ -2,8 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Btn } from '../ui/Btn.jsx'
 import { Section } from '../ui/Section.jsx'
 import { Segmented } from '../ui/Segmented.jsx'
-import { PixIcon } from '../ui/PixIcon.jsx'
-import { ICONS } from '../ui/icons.js'
+import { Icon } from '../ui/Icon.jsx'
 import { generateText } from '../../core/aiText.js'
 import {
   validateTileJson,
@@ -353,7 +352,7 @@ Do not output anything else but the raw JSON.`
             maxWidth: '90vw',
           }}>
             <h2 style={{ margin: '0 0 8px 0', fontSize: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <PixIcon name="spark" /> AI JSON Tile
+              <Icon name="spark" size={16} /> AI JSON Tile
             </h2>
             <p style={{ margin: '0 0 16px 0', fontSize: 13, color: 'var(--ink-dim)' }}>
               Describe a seamless tile (e.g. "lava rocks", "water"). Gemini will generate the JSON directly.

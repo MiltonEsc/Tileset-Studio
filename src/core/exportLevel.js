@@ -84,7 +84,8 @@ function buildLevelModel({ level, layerTiles, tileSize, assetsById = {}, tileVar
       }
       data[cell] = isEmpty ? -1 : idx
     }
-    outLayers.push({ name: layer.name, visible: layer.visible !== false, tilesetId, data })
+    outLayers.push({ name: layer.name, visible: layer.visible !== false, opacity: layer.opacity ?? 1,
+      collision: !!layer.collision, locked: !!layer.locked, group: layer.group || '', kind: layer.kind || 'autotile', tilesetId, data })
   })
 
   const props = (level.placedProps || []).map(p => {
@@ -180,8 +181,14 @@ function tiledMap(model, base) {
     height: model.height,
     x: 0,
     y: 0,
-    opacity: 1,
+    opacity: layer.opacity ?? 1,
     visible: layer.visible,
+    locked: !!layer.locked,
+    properties: [
+      { name: 'collision', type: 'bool', value: !!layer.collision },
+      { name: 'group', type: 'string', value: layer.group || '' },
+      { name: 'kind', type: 'string', value: layer.kind || 'autotile' },
+    ],
     data: layer.data.map(v => (v < 0 ? 0 : firstgids[layer.tilesetId] + v)),
   }))
 
@@ -255,7 +262,8 @@ function genericJson(model, base) {
         animation: { frameCount: ts.frameCount, frameStart: ts.frameStart, frameDuration: ts.frameDuration },
       } : {}),
     })),
-    layers: model.layers.map(l => ({ name: l.name, visible: l.visible, tileset: l.tilesetId, data: l.data })),
+    layers: model.layers.map(l => ({ name: l.name, visible: l.visible, opacity: l.opacity, locked: l.locked,
+      collision: l.collision, group: l.group, kind: l.kind, tileset: l.tilesetId, data: l.data })),
     props: model.props,
   }
 }

@@ -1,5 +1,4 @@
-import { PixIcon } from './PixIcon.jsx'
-import { ICONS } from './icons.js'
+import { Icon } from './Icon.jsx'
 
 // Button with pixel-theme variants + optional pixel icon.
 export function Btn({ children, variant = 'ghost', size = 'md', active, icon, onClick, title, style, full, disabled }) {
@@ -35,7 +34,7 @@ export function Btn({ children, variant = 'ghost', size = 'md', active, icon, on
       onMouseLeave={(e) => { e.currentTarget.style.transform = '' }}
       style={{ ...base, ...sizes[size], ...variants[variant], ...activeStyle, ...style }}
     >
-      {icon && <PixIcon grid={ICONS[icon]} px={size === 'sm' ? 1.5 : 2} />}
+      {icon && <Icon name={icon} size={size === 'sm' ? 15 : 18} />}
       {children}
     </button>
   )

@@ -8,18 +8,17 @@ import { ANIM_FRAME_MS } from '../../core/tilesetDefinition.js'
 import { MIN_CELL_PX, MAX_CELL_PX, ZOOM_STEP, ZOOM_FACTOR } from './zoomConfig.js'
 
 const NO_TRANSFORM = { flipX: false, flipY: false, rotation: 0 }
-
 // Positions/scales/rotates a pixi prop sprite for its placement transform.
 // Uses a centered anchor so flip (negative scale) and rotation pivot in place.
-function applyPropTransform(sprite, placed, entry, tileSize) {
+function applyPropTransform(sprite, placed, entry, viewCellPx) {
   const tex = sprite.texture
-  const baseSx = (entry.cols * tileSize) / tex.width
-  const baseSy = (entry.rows * tileSize) / tex.height
+  const baseSx = (entry.cols * viewCellPx) / tex.width
+  const baseSy = (entry.rows * viewCellPx) / tex.height
   sprite.anchor.set(0.5)
   sprite.scale.set(baseSx * (placed.flipX ? -1 : 1), baseSy * (placed.flipY ? -1 : 1))
   sprite.rotation = ((placed.rotation || 0) * Math.PI) / 180
-  sprite.x = (placed.x + entry.cols / 2) * tileSize
-  sprite.y = (placed.y + entry.rows / 2) * tileSize
+  sprite.x = (placed.x + entry.cols / 2) * viewCellPx
+  sprite.y = (placed.y + entry.rows / 2) * viewCellPx
 }
 
 function assetToCanvas(asset) {
@@ -41,6 +40,10 @@ export function LevelCanvas({
   propTransform = NO_TRANSFORM, tileVariation = false,
   onPlaceProp, onRemovePropAt,
   selectedProp = null, onSelectPropAt, onMoveProp,
+  selectMode = 'object', areaSelection = null, areaLayerCount = 0, areaPropCount = 0,
+  placement = null, pasteMode = 'overlay',
+  onAreaSelect, onAreaMove, onAreaTransform, onAreaHover, onPlacementCommit, onCancelPlacement,
+  onCursorCell, readOnly = false, terrainLocked = false,
   active = true, smooth = false,
 }) {
   const wrapperRef = useRef(null)
@@ -52,6 +55,11 @@ export function LevelCanvas({
   const rectDrag = useRef(null)
   const lastPaintCell = useRef(null)
   const propDrag = useRef(null) // { id, dx, dy, lastX, lastY, histPushed } for the Select tool
+  const areaDrag = useRef(null)
+  const placementHover = useRef(null)
+  const dashOffset = useRef(0)
+  const overlayRaf = useRef(0)
+  const panDrag = useRef(null)
 
   const appRef = useRef(null)
   const appReadyRef = useRef(false)
@@ -62,12 +70,38 @@ export function LevelCanvas({
   const assetTextureCache = useRef(new Map())
   const propSpriteCacheRef = useRef(new Map())
   const [pixiReady, setPixiReady] = useState(false)
+  const [gizmoHover, setGizmoHover] = useState(false)
+  const [spacePan, setSpacePan] = useState(false)
+  const [panning, setPanning] = useState(false)
 
   const displayW = width * cellPx
   const displayH = height * cellPx
-  const cursor = levelTool === 'props'
+  // Match the interactive render resolution to the on-screen zoom, not to the
+  // project's export grid. This keeps 8–64 px projects equally responsive,
+  // while avoiding a visibly low-resolution intermediate canvas.
+  const viewCellPx = Math.max(8, Math.min(32, Math.ceil(cellPx)))
+  const cursor = panning ? 'grabbing' : spacePan ? 'grab' : readOnly ? 'default' : levelTool === 'props'
     ? (selectedAssetId != null ? 'copy' : 'not-allowed')
-    : levelTool === 'select' ? 'default' : 'crosshair'
+    : levelTool === 'select' && selectMode === 'area'
+      ? (placement ? 'copy' : gizmoHover ? 'grab' : 'crosshair')
+      : levelTool === 'select' ? 'default' : 'crosshair'
+
+  useEffect(() => {
+    if (!active) return undefined
+    const down = (event) => {
+      if (event.code !== 'Space' || event.repeat) return
+      const tag = event.target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || event.target?.isContentEditable) return
+      event.preventDefault()
+      setSpacePan(true)
+    }
+    const up = (event) => { if (event.code === 'Space') setSpacePan(false) }
+    const blur = () => { setSpacePan(false); setPanning(false); panDrag.current = null }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', blur)
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur) }
+  }, [active])
 
   const forEachCellOnLine = useCallback((fromX, fromY, toX, toY, visit) => {
     let x = fromX
@@ -111,6 +145,7 @@ export function LevelCanvas({
 
       const canvas = assetToCanvas(asset)
       const texture = Texture.from(canvas, true)
+      texture.source.scaleMode = 'nearest'
       const entry = { texture, cols: asset.cols, rows: asset.rows }
       assetTextureCache.current.set(cacheKey, entry)
       cache[id] = entry
@@ -121,13 +156,15 @@ export function LevelCanvas({
 
   const getTerrainTextures = useCallback((layerTile) => {
     if (!layerTile?.tiles?.length) return null
+    const textureSmooth = !!layerTile.smooth
 
     const cached = terrainTextureCache.current.get(layerTile)
-    if (cached && cached.tileSize === (layerTile.tileSize || tileSize)) return cached
+    if (cached && cached.tileSize === (layerTile.tileSize || tileSize) && cached.smooth === textureSmooth) return cached
 
     const native = composeNativeSheet(layerTile.tiles, layerTile.tileSize || tileSize)
     const sheetTexture = Texture.from(native, true)
     const source = sheetTexture.source
+    source.scaleMode = textureSmooth ? 'linear' : 'nearest'
     const sourceTileSize = layerTile.tileSize || tileSize
 
     const textures = Array.from({ length: 48 }, (_, idx) => new Texture({
@@ -139,6 +176,7 @@ export function LevelCanvas({
     const frameTextures = (layerTile.frames || []).map(frameTiles => {
       const frameNative = composeNativeSheet(frameTiles, sourceTileSize)
       const frameSource = Texture.from(frameNative, true).source
+      frameSource.scaleMode = textureSmooth ? 'linear' : 'nearest'
       return Array.from({ length: 48 }, (_, idx) => new Texture({
         source: frameSource,
         frame: new Rectangle((idx % 8) * sourceTileSize, Math.floor(idx / 8) * sourceTileSize, sourceTileSize, sourceTileSize),
@@ -152,10 +190,12 @@ export function LevelCanvas({
       c.width = sourceTileSize
       c.height = sourceTileSize
       c.getContext('2d').putImageData(v, 0, 0)
-      return Texture.from(c, true)
+      const texture = Texture.from(c, true)
+      texture.source.scaleMode = textureSmooth ? 'linear' : 'nearest'
+      return texture
     })
 
-    const entry = { tileSize: sourceTileSize, textures, sheetTexture, fillVariantTextures, frameTextures }
+    const entry = { tileSize: sourceTileSize, smooth: textureSmooth, textures, sheetTexture, fillVariantTextures, frameTextures }
     terrainTextureCache.current.set(layerTile, entry)
     return entry
   }, [tileSize])
@@ -166,8 +206,8 @@ export function LevelCanvas({
 
     const init = async () => {
       await app.init({
-        width: Math.max(1, width * tileSize),
-        height: Math.max(1, height * tileSize),
+        width: Math.max(1, width * viewCellPx),
+        height: Math.max(1, height * viewCellPx),
         antialias: false,
         autoDensity: false,
         resolution: 1,
@@ -221,8 +261,8 @@ export function LevelCanvas({
   useEffect(() => {
     const app = appRef.current
     if (!app) return
-    app.renderer.resize(Math.max(1, width * tileSize), Math.max(1, height * tileSize))
-  }, [width, height, tileSize])
+    app.renderer.resize(Math.max(1, width * viewCellPx), Math.max(1, height * viewCellPx))
+  }, [pixiReady, width, height, viewCellPx])
 
   // The Levels view is kept mounted (for instant switching) but hidden via CSS
   // when inactive. Pause pixi's render ticker while hidden to free GPU/CPU; the
@@ -282,6 +322,7 @@ export function LevelCanvas({
       }
 
       state.container.visible = layer.visible !== false
+      state.container.alpha = Math.max(0, Math.min(1, layer.opacity ?? 1))
       if (state.sprites.length !== expected || state.width !== width || state.height !== height) {
         state.container.removeChildren()
         state.sprites = []
@@ -289,10 +330,10 @@ export function LevelCanvas({
           const sprite = new Sprite(Texture.EMPTY)
           sprite.visible = false
           sprite.roundPixels = true
-          sprite.x = (cell % width) * tileSize
-          sprite.y = ((cell / width) | 0) * tileSize
-          sprite.width = tileSize
-          sprite.height = tileSize
+          sprite.x = (cell % width) * viewCellPx
+          sprite.y = ((cell / width) | 0) * viewCellPx
+          sprite.width = viewCellPx
+          sprite.height = viewCellPx
           state.container.addChild(sprite)
           state.sprites.push(sprite)
         }
@@ -305,10 +346,10 @@ export function LevelCanvas({
       } else {
         for (let cell = 0; cell < expected; cell++) {
           const sprite = state.sprites[cell]
-          sprite.x = (cell % width) * tileSize
-          sprite.y = ((cell / width) | 0) * tileSize
-          sprite.width = tileSize
-          sprite.height = tileSize
+          sprite.x = (cell % width) * viewCellPx
+          sprite.y = ((cell / width) | 0) * viewCellPx
+          sprite.width = viewCellPx
+          sprite.height = viewCellPx
         }
       }
       return state
@@ -326,6 +367,7 @@ export function LevelCanvas({
         || state.tileRef !== layerTile
         || state.border !== border
         || state.variation !== useVariants
+        || state.collision !== !!layer.collision
 
       let indexMap = state.indexMap
       let dirtyCells = []
@@ -377,10 +419,12 @@ export function LevelCanvas({
           if (pick > 0) tex = variants[pick - 1]
         }
         sprite.texture = tex || Texture.EMPTY
+        sprite.tint = layer.collision ? 0xff5c68 : 0xffffff
         sprite.visible = true
       }
 
       state.variation = useVariants
+      state.collision = !!layer.collision
       state.indexMap = indexMap
       state.grid = layer.grid
       state.manualTiles = layer.manualTiles
@@ -388,7 +432,7 @@ export function LevelCanvas({
       state.border = border
       state.texEntry = textureEntry
     })
-  }, [pixiReady, layers, layerTiles, width, height, tileSize, seamlessEdges, getTerrainTextures, tileVariation])
+  }, [pixiReady, layers, layerTiles, width, height, tileSize, viewCellPx, seamlessEdges, getTerrainTextures, tileVariation])
 
   // Animation ticker: when any layer's tileset has frames, cycle every sprite's
   // texture through [base, ...frames] using the per-cell sheet index recorded
@@ -446,7 +490,7 @@ export function LevelCanvas({
         sprite.texture = entry.texture
       }
       sprite.zIndex = order
-      applyPropTransform(sprite, placed, entry, tileSize)
+      applyPropTransform(sprite, placed, entry, viewCellPx)
     })
 
     for (const [id, sprite] of cache) {
@@ -455,7 +499,37 @@ export function LevelCanvas({
       sprite.destroy()
       cache.delete(id)
     }
-  }, [pixiReady, placedProps, assetTextures, tileSize])
+  }, [pixiReady, placedProps, assetTextures, viewCellPx])
+
+  const getAreaGizmo = useCallback((rect) => {
+    if (!rect) return null
+    const pivot = { x: rect.x * cellPx + 1, y: rect.y * cellPx + 1 }
+    const radius = 28
+    const candidates = [-Math.PI / 2, 0, Math.PI / 2, Math.PI]
+    const angle = candidates.find(a => {
+      const x = pivot.x + Math.cos(a) * radius
+      const y = pivot.y + Math.sin(a) * radius
+      return x >= 10 && y >= 10 && x <= width * cellPx - 10 && y <= height * cellPx - 10
+    }) ?? 0
+    return {
+      pivot, radius,
+      handle: { x: pivot.x + Math.cos(angle) * radius, y: pivot.y + Math.sin(angle) * radius },
+    }
+  }, [cellPx, width, height])
+
+  const captureAreaPreview = useCallback((rect) => {
+    const app = appRef.current
+    if (!rect || !app?.renderer?.extract || !app.stage) return null
+    try {
+      return app.renderer.extract.canvas({
+        target: app.stage,
+        frame: new Rectangle(rect.x * viewCellPx, rect.y * viewCellPx, rect.width * viewCellPx, rect.height * viewCellPx),
+        resolution: 1,
+      })
+    } catch {
+      return null
+    }
+  }, [viewCellPx])
 
   const drawOverlay = useCallback(() => {
     const canvas = overlayRef.current
@@ -500,7 +574,7 @@ export function LevelCanvas({
       }
     }
 
-    if (levelTool === 'select' && selectedProp) {
+    if (levelTool === 'select' && selectMode === 'object' && selectedProp) {
       const a = assetsById[selectedProp.assetId]
       if (a) {
         // Same visual footprint as the hit-test: rotation swaps the extents.
@@ -527,9 +601,162 @@ export function LevelCanvas({
       ctx.lineWidth = 2
       ctx.strokeRect(x0 * cellPx + 1, y0 * cellPx + 1, (x1 - x0 + 1) * cellPx - 2, (y1 - y0 + 1) * cellPx - 2)
     }
-  }, [width, height, cellPx, showGrid, levelTool, selectedAssetId, assetTextures, terrainTool, propTransform, selectedProp, assetsById])
+
+    if (levelTool === 'select' && selectMode === 'area') {
+      const drag = areaDrag.current
+      let rect = areaSelection
+      let ghost = false
+
+      if (drag?.cur) {
+        if (drag.kind === 'select') {
+          const x = Math.min(drag.start[0], drag.cur[0])
+          const y = Math.min(drag.start[1], drag.cur[1])
+          rect = { x, y, width: Math.abs(drag.cur[0] - drag.start[0]) + 1, height: Math.abs(drag.cur[1] - drag.start[1]) + 1 }
+        } else if (drag.kind === 'move') {
+          rect = {
+            ...drag.origin,
+            x: drag.origin.x + drag.cur[0] - drag.start[0],
+            y: drag.origin.y + drag.cur[1] - drag.start[1],
+          }
+          ghost = true
+        } else if (drag.kind === 'rotate') {
+          const quarterTurns = ((drag.turns % 4) + 4) % 4
+          const swap = quarterTurns % 2 === 1
+          rect = {
+            ...drag.origin,
+            width: swap ? drag.origin.height : drag.origin.width,
+            height: swap ? drag.origin.width : drag.origin.height,
+          }
+          ghost = quarterTurns !== 0
+        }
+      }
+
+      if (placement) {
+        const hover = placementHover.current || [placement.x || 0, placement.y || 0]
+        rect = { x: hover[0], y: hover[1], width: placement.payload.width, height: placement.payload.height }
+        ghost = true
+      }
+
+      if (rect) {
+        const px = rect.x * cellPx
+        const py = rect.y * cellPx
+        const pw = rect.width * cellPx
+        const ph = rect.height * cellPx
+        ctx.save()
+
+        if ((drag?.kind === 'move' || drag?.kind === 'rotate') && drag.preview) {
+          const source = drag.origin
+          const displaySourceW = source.width * cellPx
+          const displaySourceH = source.height * cellPx
+          const quarterTurns = drag.kind === 'rotate' ? ((drag.turns % 4) + 4) % 4 : 0
+
+          ctx.fillStyle = 'rgba(4,8,13,0.38)'
+          ctx.fillRect(source.x * cellPx, source.y * cellPx, displaySourceW, displaySourceH)
+          ctx.globalAlpha = 0.52
+          ctx.imageSmoothingEnabled = smooth
+          if (quarterTurns === 1) {
+            ctx.translate(px + pw, py)
+            ctx.rotate(Math.PI / 2)
+            ctx.drawImage(drag.preview, 0, 0, drag.preview.width, drag.preview.height, 0, 0, displaySourceW, displaySourceH)
+          } else if (quarterTurns === 2) {
+            ctx.translate(px + pw, py + ph)
+            ctx.rotate(Math.PI)
+            ctx.drawImage(drag.preview, 0, 0, drag.preview.width, drag.preview.height, 0, 0, displaySourceW, displaySourceH)
+          } else if (quarterTurns === 3) {
+            ctx.translate(px, py + ph)
+            ctx.rotate(-Math.PI / 2)
+            ctx.drawImage(drag.preview, 0, 0, drag.preview.width, drag.preview.height, 0, 0, displaySourceW, displaySourceH)
+          } else {
+            ctx.drawImage(drag.preview, 0, 0, drag.preview.width, drag.preview.height, px, py, displaySourceW, displaySourceH)
+          }
+          ctx.restore()
+          ctx.save()
+        }
+
+        ctx.fillStyle = ghost
+          ? (pasteMode === 'replace' ? 'rgba(255,178,72,0.16)' : 'rgba(47,214,166,0.16)')
+          : 'rgba(47,214,166,0.08)'
+        ctx.fillRect(px, py, pw, ph)
+        ctx.strokeStyle = ghost && pasteMode === 'replace' ? '#ffb248' : '#2fd6a6'
+        ctx.lineWidth = 2
+        ctx.setLineDash([7, 5])
+        ctx.lineDashOffset = -dashOffset.current
+        ctx.strokeRect(px + 1, py + 1, Math.max(0, pw - 2), Math.max(0, ph - 2))
+        ctx.setLineDash([])
+
+        const layerCount = placement?.payload?.planes?.length ?? areaLayerCount
+        const propCount = placement?.payload?.props?.length ?? areaPropCount
+        const minX = Math.min(0, rect.x)
+        const minY = Math.min(0, rect.y)
+        const maxX = Math.max(width, rect.x + rect.width)
+        const maxY = Math.max(height, rect.y + rect.height)
+        const futureW = maxX - minX
+        const futureH = maxY - minY
+        let label = `${rect.width}×${rect.height} · ${layerCount} capa${layerCount === 1 ? '' : 's'} · ${propCount} prop${propCount === 1 ? '' : 's'}`
+        if (futureW !== width || futureH !== height) label += ` · mapa ${futureW}×${futureH}`
+        ctx.font = '600 12px system-ui, sans-serif'
+        const metrics = ctx.measureText(label)
+        const labelX = Math.max(2, Math.min(dW - metrics.width - 12, px + 2))
+        const labelY = Math.max(18, Math.min(dH - 4, py - 6))
+        ctx.fillStyle = 'rgba(12,18,27,0.9)'
+        ctx.fillRect(labelX, labelY - 16, metrics.width + 10, 20)
+        ctx.fillStyle = '#eafcf7'
+        ctx.fillText(label, labelX + 5, labelY - 2)
+        ctx.restore()
+      }
+
+      if (areaSelection && !placement && areaDrag.current?.kind !== 'select' && areaDrag.current?.kind !== 'move') {
+        const gizmo = getAreaGizmo(areaSelection)
+        if (gizmo) {
+          const rotateDrag = areaDrag.current?.kind === 'rotate' ? areaDrag.current : null
+          const snappedAngle = rotateDrag ? rotateDrag.startAngle + rotateDrag.turns * Math.PI / 2 : null
+          const handle = rotateDrag
+            ? { x: gizmo.pivot.x + Math.cos(snappedAngle) * gizmo.radius, y: gizmo.pivot.y + Math.sin(snappedAngle) * gizmo.radius }
+            : gizmo.handle
+          ctx.save()
+          ctx.strokeStyle = 'rgba(47,214,166,0.95)'
+          ctx.lineWidth = 2
+          ctx.beginPath(); ctx.moveTo(gizmo.pivot.x, gizmo.pivot.y); ctx.lineTo(handle.x, handle.y); ctx.stroke()
+          ctx.fillStyle = '#101923'
+          ctx.beginPath(); ctx.arc(gizmo.pivot.x, gizmo.pivot.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
+          ctx.fillStyle = '#2fd6a6'
+          ctx.beginPath(); ctx.arc(handle.x, handle.y, 8, 0, Math.PI * 2); ctx.fill()
+          ctx.fillStyle = '#07120f'
+          ctx.font = '700 11px system-ui, sans-serif'
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('↻', handle.x, handle.y)
+          ctx.restore()
+        }
+      }
+    }
+  }, [width, height, cellPx, showGrid, smooth, levelTool, selectedAssetId, assetTextures, terrainTool, propTransform, selectedProp, assetsById, selectMode, areaSelection, placement, pasteMode, areaLayerCount, areaPropCount, getAreaGizmo])
+
+  const scheduleOverlay = useCallback(() => {
+    if (overlayRaf.current) return
+    overlayRaf.current = requestAnimationFrame(() => {
+      overlayRaf.current = 0
+      drawOverlay()
+    })
+  }, [drawOverlay])
+
+  useEffect(() => () => {
+    if (overlayRaf.current) cancelAnimationFrame(overlayRaf.current)
+  }, [])
 
   useEffect(() => { drawOverlay() }, [drawOverlay])
+
+  useEffect(() => {
+    if (levelTool !== 'select' || selectMode !== 'area' || (!areaSelection && !placement)) return undefined
+    const timer = window.setInterval(() => {
+      dashOffset.current = (dashOffset.current + 1) % 12
+      drawOverlay()
+    }, 90)
+    return () => window.clearInterval(timer)
+  }, [levelTool, selectMode, areaSelection, placement, drawOverlay])
+
+  useEffect(() => {
+    placementHover.current = placement ? [placement.x || 0, placement.y || 0] : null
+    drawOverlay()
+  }, [placement, drawOverlay])
 
   useLayoutEffect(() => {
     const anchor = zoomAnchor.current
@@ -549,6 +776,11 @@ export function LevelCanvas({
       Math.floor((e.clientY - rect.top) / cellPx),
     ]
   }, [cellPx])
+
+  const pixelFromEvent = useCallback((e) => {
+    const rect = wrapperRef.current.getBoundingClientRect()
+    return [e.clientX - rect.left, e.clientY - rect.top]
+  }, [])
 
   // Zoom to a target cell size, anchored at a client point so the cursor/pinch
   // centre stays put (the useLayoutEffect above restores scroll from zoomAnchor).
@@ -598,8 +830,57 @@ export function LevelCanvas({
 
   const handleDown = useCallback((e) => {
     e.preventDefault()
+    if ((spacePan && e.button === 0) || e.button === 1) {
+      const container = wrapperRef.current?.closest('.level-canvas-area')
+      if (container) {
+        panDrag.current = { clientX: e.clientX, clientY: e.clientY, scrollLeft: container.scrollLeft, scrollTop: container.scrollTop, container }
+        setPanning(true)
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+      }
+      return
+    }
+    if (readOnly) return
+    if (terrainLocked && levelTool === 'terrain') return
     const [x, y] = cellFromEvent(e)
     if (levelTool === 'select') {
+      if (selectMode === 'area') {
+        if (e.button === 2) {
+          if (placement) onCancelPlacement?.()
+          return
+        }
+        if (placement) {
+          placementHover.current = [x, y]
+          onPlacementCommit?.(x, y)
+          return
+        }
+        const pointerPx = pixelFromEvent(e)
+        const gizmo = getAreaGizmo(areaSelection)
+        if (gizmo && Math.hypot(pointerPx[0] - gizmo.handle.x, pointerPx[1] - gizmo.handle.y) <= 13) {
+          const startAngle = Math.atan2(pointerPx[1] - gizmo.pivot.y, pointerPx[0] - gizmo.pivot.x)
+          setGizmoHover(true)
+          areaDrag.current = {
+            kind: 'rotate', origin: areaSelection,
+            startPx: pointerPx, curPx: pointerPx,
+            startAngle, lastAngle: startAngle, accumulatedAngle: 0,
+            pivot: gizmo.pivot, turns: 0, cur: [x, y],
+            preview: captureAreaPreview(areaSelection),
+          }
+          e.currentTarget.setPointerCapture?.(e.pointerId)
+          drawOverlay()
+          return
+        }
+        if (areaSelection && x >= areaSelection.x && y >= areaSelection.y && x < areaSelection.x + areaSelection.width && y < areaSelection.y + areaSelection.height) {
+          areaDrag.current = {
+            kind: 'move', start: [x, y], cur: [x, y], origin: areaSelection,
+            preview: captureAreaPreview(areaSelection),
+          }
+        } else {
+          areaDrag.current = { kind: 'select', start: [x, y], cur: [x, y] }
+        }
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+        scheduleOverlay()
+        return
+      }
       const hit = onSelectPropAt?.(x, y)
       propDrag.current = hit
         ? { id: hit.id, dx: x - hit.x, dy: y - hit.y, lastX: hit.x, lastY: hit.y, histPushed: false }
@@ -621,11 +902,43 @@ export function LevelCanvas({
     painting.current = true
     lastPaintCell.current = [x, y]
     onStartPaint(x, y, e.button === 2, terrainBrushSize)
-  }, [cellFromEvent, drawOverlay, levelTool, onFillTerrain, onPickTerrain, onPlaceProp, onRemovePropAt, onSelectPropAt, onStartPaint, terrainBrushSize, terrainTool])
+  }, [spacePan, readOnly, terrainLocked, cellFromEvent, pixelFromEvent, getAreaGizmo, captureAreaPreview, drawOverlay, scheduleOverlay, levelTool, selectMode, placement, areaSelection, onCancelPlacement, onPlacementCommit, onFillTerrain, onPickTerrain, onPlaceProp, onRemovePropAt, onSelectPropAt, onStartPaint, terrainBrushSize, terrainTool])
 
   const handleMove = useCallback((e) => {
+    if (panDrag.current) {
+      const drag = panDrag.current
+      drag.container.scrollLeft = drag.scrollLeft - (e.clientX - drag.clientX)
+      drag.container.scrollTop = drag.scrollTop - (e.clientY - drag.clientY)
+      return
+    }
     const [x, y] = cellFromEvent(e)
+    onCursorCell?.(x, y)
     if (levelTool === 'select') {
+      if (selectMode === 'area') {
+        onAreaHover?.(x, y)
+        if (placement) placementHover.current = [x, y]
+        if (areaDrag.current?.kind === 'rotate') {
+          const pointerPx = pixelFromEvent(e)
+          const drag = areaDrag.current
+          drag.curPx = pointerPx
+          drag.cur = [x, y]
+          const angle = Math.atan2(pointerPx[1] - drag.pivot.y, pointerPx[0] - drag.pivot.x)
+          let delta = angle - drag.lastAngle
+          if (delta > Math.PI) delta -= Math.PI * 2
+          else if (delta < -Math.PI) delta += Math.PI * 2
+          drag.accumulatedAngle += delta
+          drag.lastAngle = angle
+          drag.turns = Math.round(drag.accumulatedAngle / (Math.PI / 2))
+        } else if (areaDrag.current) areaDrag.current.cur = [x, y]
+        else if (!placement) {
+          const pointerPx = pixelFromEvent(e)
+          const gizmo = getAreaGizmo(areaSelection)
+          const hovering = !!gizmo && Math.hypot(pointerPx[0] - gizmo.handle.x, pointerPx[1] - gizmo.handle.y) <= 13
+          setGizmoHover(prev => prev === hovering ? prev : hovering)
+        }
+        scheduleOverlay()
+        return
+      }
       const d = propDrag.current
       if (!d) return
       const nx = x - d.dx
@@ -641,12 +954,12 @@ export function LevelCanvas({
     }
     if (levelTool === 'props') {
       hoverCell.current = [x, y]
-      drawOverlay()
+      scheduleOverlay()
       return
     }
     if (terrainTool === 'rect' && rectDrag.current) {
       rectDrag.current.cur = [x, y]
-      drawOverlay()
+      scheduleOverlay()
       return
     }
     if (!painting.current) return
@@ -659,9 +972,38 @@ export function LevelCanvas({
     if (prev[0] === x && prev[1] === y) return
     forEachCellOnLine(prev[0], prev[1], x, y, (px, py) => onContinuePaint(px, py, terrainBrushSize))
     lastPaintCell.current = [x, y]
-  }, [cellFromEvent, drawOverlay, forEachCellOnLine, levelTool, onContinuePaint, onMoveProp, terrainBrushSize, terrainTool])
+  }, [cellFromEvent, pixelFromEvent, getAreaGizmo, areaSelection, scheduleOverlay, forEachCellOnLine, levelTool, selectMode, placement, onCursorCell, onAreaHover, onContinuePaint, onMoveProp, terrainBrushSize, terrainTool])
 
-  const handleUp = useCallback(() => {
+  const handleUp = useCallback((e) => {
+    if (panDrag.current) {
+      panDrag.current = null
+      setPanning(false)
+      e?.currentTarget?.releasePointerCapture?.(e.pointerId)
+      return
+    }
+    if (levelTool === 'select' && selectMode === 'area' && areaDrag.current) {
+      const drag = areaDrag.current
+      areaDrag.current = null
+      if (drag.kind === 'rotate') {
+        let turns = drag.turns
+        if (turns === 0 && Math.hypot(drag.curPx[0] - drag.startPx[0], drag.curPx[1] - drag.startPx[1]) < 6) turns = 1
+        const normalized = ((turns % 4) + 4) % 4
+        const operation = normalized === 1 ? 'rotate' : normalized === 2 ? 'rotate180' : normalized === 3 ? 'rotate270' : null
+        if (operation) onAreaTransform?.(operation)
+      } else if (drag.kind === 'select') {
+        const x = Math.min(drag.start[0], drag.cur[0])
+        const y = Math.min(drag.start[1], drag.cur[1])
+        onAreaSelect?.({ x, y, width: Math.abs(drag.cur[0] - drag.start[0]) + 1, height: Math.abs(drag.cur[1] - drag.start[1]) + 1 })
+      } else {
+        const x = drag.origin.x + drag.cur[0] - drag.start[0]
+        const y = drag.origin.y + drag.cur[1] - drag.start[1]
+        if (x !== drag.origin.x || y !== drag.origin.y) onAreaMove?.(x, y)
+      }
+      e?.currentTarget?.releasePointerCapture?.(e.pointerId)
+      setGizmoHover(false)
+      drawOverlay()
+      return
+    }
     if (rectDrag.current) {
       const { start, cur, erase } = rectDrag.current
       if (cur && onRectTerrain) onRectTerrain({ x: start[0], y: start[1] }, { x: cur[0], y: cur[1] }, erase)
@@ -672,9 +1014,17 @@ export function LevelCanvas({
     lastPaintCell.current = null
     propDrag.current = null
     onEndPaint?.()
-  }, [drawOverlay, onEndPaint, onRectTerrain])
+  }, [drawOverlay, levelTool, selectMode, onAreaMove, onAreaSelect, onAreaTransform, onEndPaint, onRectTerrain])
 
   const handleLeave = useCallback(() => {
+    if (levelTool === 'select' && selectMode === 'area') {
+      setGizmoHover(false)
+      if (placement && placementHover.current) {
+        placementHover.current = null
+        drawOverlay()
+      }
+      return
+    }
     painting.current = false
     rectDrag.current = null
     lastPaintCell.current = null
@@ -684,18 +1034,19 @@ export function LevelCanvas({
       hoverCell.current = null
       drawOverlay()
     }
-  }, [drawOverlay, onEndPaint])
+  }, [drawOverlay, levelTool, selectMode, placement, onEndPaint])
 
   return (
     <div
       ref={wrapperRef}
       className="level-canvas-wrapper"
       // touchAction:none lets @use-gesture handle touch pinch-zoom on the canvas.
-      style={{ position: 'relative', width: displayW, height: displayH, cursor, touchAction: 'none' }}
-      onMouseDown={handleDown}
-      onMouseMove={handleMove}
-      onMouseUp={handleUp}
-      onMouseLeave={handleLeave}
+      style={{ position: 'relative', width: displayW, height: displayH, cursor, touchAction: 'none', userSelect: 'none' }}
+      onPointerDown={handleDown}
+      onPointerMove={handleMove}
+      onPointerUp={handleUp}
+      onPointerCancel={handleUp}
+      onPointerLeave={handleLeave}
       onContextMenu={e => e.preventDefault()}
     >
       <div

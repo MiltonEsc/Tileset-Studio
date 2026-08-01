@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useAuth } from '../../hooks/useAuth.js'
 import { Btn } from '../ui/Btn.jsx'
-import { PixIcon } from '../ui/PixIcon.jsx'
-import { ICONS } from '../ui/icons.js'
+import { Icon } from '../ui/Icon.jsx'
+import { useI18n } from '../../i18n.jsx'
 
 // Gates the whole app behind Supabase Auth. `children` is a render prop that
 // receives the auth object (user, signOut, ...) so App can show the account
@@ -25,6 +25,7 @@ export function AuthGate({ children }) {
 }
 
 function AuthScreen({ auth }) {
+  const { t, language, setLanguage } = useI18n()
   // 'signin' | 'signup' | 'reset'
   const [mode, setMode] = useState('signin')
   const [email, setEmail] = useState('')
@@ -56,15 +57,18 @@ function AuthScreen({ auth }) {
     }
   }
 
-  const titles = { signin: 'Sign in', signup: 'Create account', reset: 'Reset password' }
-  const ctas   = { signin: 'Sign in', signup: 'Create account', reset: 'Send reset email' }
+  const titles = { signin: t('signIn'), signup: t('createAccount'), reset: t('resetPassword') }
+  const ctas   = { signin: t('signIn'), signup: t('createAccount'), reset: t('sendResetEmail') }
 
   return (
     <div className="auth-screen">
       <form className="auth-card" onSubmit={submit}>
         <div className="auth-brand">
-          <div className="brand-mark"><PixIcon grid={ICONS.grid} px={3} color="#06150f" /></div>
+          <div className="brand-mark"><Icon name="grid" size={19} /></div>
           <span className="brand-name">Tileset Studio</span>
+          <select className="language-select" value={language} onChange={e => setLanguage(e.target.value)} aria-label={t('language')}>
+            <option value="es">ES</option><option value="en">EN</option>
+          </select>
         </div>
         <h1 className="auth-title">{titles[mode]}</h1>
 
@@ -74,7 +78,7 @@ function AuthScreen({ auth }) {
 
         {mode !== 'reset' && (
           <>
-            <label className="field-label" htmlFor="auth-password">Password</label>
+            <label className="field-label" htmlFor="auth-password">{t('password')}</label>
             <input id="auth-password" className="text-input" type="password" required minLength={6}
               autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
               value={password} onChange={e => setPassword(e.target.value)} />
@@ -86,18 +90,18 @@ function AuthScreen({ auth }) {
 
         {/* Btn renders a <button> without an explicit type → submits the form. */}
         <Btn variant="primary" full disabled={busy} style={{ marginTop: 14 }}>
-          {busy ? 'Working…' : ctas[mode]}
+          {busy ? t('working') : ctas[mode]}
         </Btn>
 
         <div className="auth-links">
           {mode !== 'signin' && (
-            <button type="button" className="auth-link" onClick={() => switchMode('signin')}>Sign in</button>
+            <button type="button" className="auth-link" onClick={() => switchMode('signin')}>{t('signIn')}</button>
           )}
           {mode !== 'signup' && (
-            <button type="button" className="auth-link" onClick={() => switchMode('signup')}>Create account</button>
+            <button type="button" className="auth-link" onClick={() => switchMode('signup')}>{t('createAccount')}</button>
           )}
           {mode !== 'reset' && (
-            <button type="button" className="auth-link" onClick={() => switchMode('reset')}>Forgot password?</button>
+            <button type="button" className="auth-link" onClick={() => switchMode('reset')}>{t('forgotPassword')}</button>
           )}
         </div>
       </form>
@@ -107,6 +111,7 @@ function AuthScreen({ auth }) {
 
 // Shown after the user lands from a password-reset email (PASSWORD_RECOVERY).
 function RecoveryScreen({ auth }) {
+  const { t } = useI18n()
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -127,19 +132,19 @@ function RecoveryScreen({ auth }) {
     <div className="auth-screen">
       <form className="auth-card" onSubmit={submit}>
         <div className="auth-brand">
-          <div className="brand-mark"><PixIcon grid={ICONS.grid} px={3} color="#06150f" /></div>
+          <div className="brand-mark"><Icon name="grid" size={19} /></div>
           <span className="brand-name">Tileset Studio</span>
         </div>
-        <h1 className="auth-title">Set a new password</h1>
+        <h1 className="auth-title">{t('setNewPassword')}</h1>
 
-        <label className="field-label" htmlFor="auth-new-password">New password</label>
+        <label className="field-label" htmlFor="auth-new-password">{t('newPassword')}</label>
         <input id="auth-new-password" className="text-input" type="password" required minLength={6}
           autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} />
 
         {error && <p className="auth-error">{error}</p>}
 
         <Btn variant="primary" full disabled={busy} style={{ marginTop: 14 }}>
-          {busy ? 'Working…' : 'Save password'}
+          {busy ? t('working') : t('savePassword')}
         </Btn>
       </form>
     </div>

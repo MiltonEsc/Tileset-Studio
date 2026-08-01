@@ -1,0 +1,29 @@
+{
+  "name": "spritefusion-pixel-snapper",
+  "type": "module",
+  "description": "Fix AI-generated pixel art by detecting and snapping it to its implicit grid.",
+  "version": "1.0.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hugo-Dz/spritefusion-pixel-snapper"
+  },
+  "files": [
+    "spritefusion_pixel_snapper_bg.wasm",
+    "spritefusion_pixel_snapper.js",
+    "spritefusion_pixel_snapper.d.ts"
+  ],
+  "main": "spritefusion_pixel_snapper.js",
+  "homepage": "https://www.spritefusion.com/pixel-snapper",
+  "types": "spritefusion_pixel_snapper.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "pixel-art",
+    "image-processing",
+    "cli",
+    "wasm",
+    "gamedev"
+  ]
+}

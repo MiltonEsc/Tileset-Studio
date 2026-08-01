@@ -4,12 +4,12 @@
 // preview is a lightweight `rawToPreview` descriptor ({ url, width, height,
 // provider }). The url is a PNG data-URL used for both the thumbnail and the
 // download, so no multi-MB pixel buffer is held in React state/props.
-export function RawAIPreview({ items }) {
+export function RawAIPreview({ items, hint = 'Raw AI image (before the app pixelizes it):' }) {
   const shots = (items || []).filter(it => it?.preview?.url)
   if (!shots.length) return null
   return (
     <div className="ai-raw-preview">
-      <div className="ai-hint">Raw AI image (before the app pixelizes it):</div>
+      <div className="ai-hint">{hint}</div>
       <div className="ai-raw-row">
         {shots.map(({ label, preview }) => (
           <figure className="ai-raw-shot" key={label}>

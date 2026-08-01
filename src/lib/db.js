@@ -94,3 +94,26 @@ export async function removeLevel(id) {
   const sb = requireClient(await getSupabase())
   unwrap(await sb.from('levels').delete().eq('id', id))
 }
+
+// ── Stamps / multi-layer prefabs ────────────────────────────────────────────
+export async function listStamps() {
+  const sb = await getSupabase()
+  if (!sb) return []
+  return unwrap(await sb.from('stamps').select('*').order('created_at', { ascending: true }))
+}
+
+export async function saveStamp({ id, name, width, height, tileSize, payload }) {
+  const sb = requireClient(await getSupabase())
+  const values = { name, width, height, tile_size: tileSize, payload }
+  if (id) {
+    const rows = unwrap(await sb.from('stamps').update(values).eq('id', id).select())
+    return rows[0]
+  }
+  const rows = unwrap(await sb.from('stamps').insert(values).select())
+  return rows[0]
+}
+
+export async function removeStamp(id) {
+  const sb = requireClient(await getSupabase())
+  unwrap(await sb.from('stamps').delete().eq('id', id))
+}

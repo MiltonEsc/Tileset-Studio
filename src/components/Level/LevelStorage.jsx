@@ -1,7 +1,10 @@
 import { useState } from 'react'
+import { Icon } from '../ui/Icon.jsx'
+import { useI18n } from '../../i18n.jsx'
 
 // Save the current level to the cloud and load/delete saved ones.
 export function LevelStorage({ levels, onSave, onLoad, onRemove }) {
+  const { t } = useI18n()
   const [name, setName] = useState('')
 
   const handleSave = () => {
@@ -28,7 +31,7 @@ export function LevelStorage({ levels, onSave, onLoad, onRemove }) {
               <button className="level-list-load" onClick={() => onLoad(l)} title={`Load ${l.name} (${l.width}×${l.height})`}>
                 {l.name} <span className="level-list-dim">{l.width}×{l.height}</span>
               </button>
-              <button className="level-list-del" onClick={() => onRemove(l.id)} title="Delete">×</button>
+              <button className="level-list-del" onClick={() => onRemove(l.id)} title={t('delete')} aria-label={t('delete')}><Icon name="trash" size={14} /></button>
             </div>
           ))}
         </div>

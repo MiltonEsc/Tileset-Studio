@@ -1,5 +1,7 @@
 import { useRef, useEffect, memo } from 'react'
 import { useInView } from '../../hooks/useInView.js'
+import { Icon } from '../ui/Icon.jsx'
+import { useI18n } from '../../i18n.jsx'
 
 // Renders one prop's pixels into a small canvas thumbnail.
 function AssetThumb({ asset, size = 56 }) {
@@ -38,6 +40,7 @@ function AssetThumb({ asset, size = 56 }) {
 // scrolls into view, and the card skips re-render when sibling state changes.
 const AssetCard = memo(function AssetCard({ asset, selected, onSelect, onLoadToEditor, onExport, onRemove }) {
   const [ref, inView] = useInView()
+  const { t } = useI18n()
   return (
     <div
       ref={ref}
@@ -52,7 +55,7 @@ const AssetCard = memo(function AssetCard({ asset, selected, onSelect, onLoadToE
       <div className="asset-card-actions">
         <button className="asset-card-btn" onClick={(e) => { e.stopPropagation(); onLoadToEditor(asset) }} title="Edit in canvas">Edit</button>
         <button className="asset-card-btn" onClick={(e) => { e.stopPropagation(); onExport(asset) }} title="Export PNG">PNG</button>
-        <button className="asset-card-btn danger" onClick={(e) => { e.stopPropagation(); onRemove(asset.id) }} title="Delete">×</button>
+        <button className="asset-card-btn danger" onClick={(e) => { e.stopPropagation(); onRemove(asset.id) }} title={t('delete')} aria-label={t('delete')}><Icon name="trash" size={14} /></button>
       </div>
     </div>
   )
@@ -62,10 +65,11 @@ export function AssetGallery({
   assets, selectedId, onSelect, onRemove, onExport, onLoadToEditor, onExportAll,
   loading = false, error = '',
 }) {
+  const { t } = useI18n()
   return (
     <div className="asset-gallery">
       <div className="asset-gallery-head">
-        <span className="asset-gallery-title">Gallery ({assets.length})</span>
+        <span className="asset-gallery-title">{t('gallery')} ({assets.length})</span>
         <button
           className="asset-mini-btn"
           onClick={onExportAll}

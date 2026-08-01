@@ -4,14 +4,14 @@ import { Segmented } from '../ui/Segmented.jsx'
 import { Section } from '../ui/Section.jsx'
 import { Btn } from '../ui/Btn.jsx'
 import { ColorRow } from '../ui/ColorRow.jsx'
-import { PixIcon } from '../ui/PixIcon.jsx'
-import { ICONS } from '../ui/icons.js'
+import { Icon } from '../ui/Icon.jsx'
 import { PixelCanvas } from './PixelCanvas.jsx'
 import { TilePreviewMosaic } from './TilePreviewMosaic.jsx'
 import { JsonImportExport } from './JsonImportExport.jsx'
 import { composeNativeSheet } from '../../core/composeSheet.js'
 import { exportTilesheet } from '../../core/exportSheet.js'
 import { ANIM_FRAME_MS } from '../../core/tilesetDefinition.js'
+import { useI18n } from '../../i18n.jsx'
 
 // AI panels pull in the Gemini/OpenAI request code; load them only when the
 // (collapsed-by-default) "AI textures" section is opened.
@@ -144,6 +144,7 @@ export function EditorWorkspace({
   animFrameCount = 1, setAnimFrameCount, canAnimate = false, animFrames = null,
   active = true,
 }) {
+  const { t } = useI18n()
   const { presets, savePreset, removePreset, importPreset } = usePresets()
   const [zoom, setZoom] = useState(() => fitSheetZoom(tileSize))
   const [exportScale, setExportScale] = useState(1)
@@ -172,13 +173,13 @@ export function EditorWorkspace({
     <div className="editor-grid">
       <aside className="panel">
         <div className="panel-scroll">
-          <Section title="Mode" icon="layers">
+          <Section title={t('mode')} icon="layers">
             <Segmented
               full
               size="sm"
               value={mode}
               onChange={setMode}
-              options={[{ value: 'procedural', label: 'Procedural' }, { value: 'draw', label: 'Draw' }]}
+              options={[{ value: 'procedural', label: t('procedural') }, { value: 'draw', label: t('draw') }]}
             />
           </Section>
 
@@ -194,11 +195,11 @@ export function EditorWorkspace({
                   ))}
                 </div>
                 <div className="row-btns">
-                  <Btn size="sm" variant="accentSoft" icon="dice" full onClick={onShuffleColors}>Shuffle</Btn>
-                  <Btn size="sm" variant="outline" icon="reset" full onClick={onResetColors}>Reset</Btn>
+                  <Btn size="sm" variant="accentSoft" icon="dice" full onClick={onShuffleColors}>{t('shuffle')}</Btn>
+                  <Btn size="sm" variant="outline" icon="reset" full onClick={onResetColors}>{t('reset')}</Btn>
                 </div>
               </Section>
-              <Section title="Generator Settings" icon="grid">
+              <Section title={t('generatorSettings')} icon="grid">
                 <label className="field-label">Engine</label>
                 <Segmented
                   full
@@ -246,7 +247,7 @@ export function EditorWorkspace({
                 )}
               </Section>
 
-            <Section title="Preset Library" icon="folder">
+            <Section title={t('presetLibrary')} icon="folder">
               <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
                 <Btn size="sm" variant="outline" full onClick={() => {
                   const name = prompt('Preset name:')
@@ -282,7 +283,7 @@ export function EditorWorkspace({
                     }} title="Copy JSON">Share</Btn>
                     <Btn size="sm" variant="outline" onClick={() => {
                       if (confirm('Delete preset?')) removePreset(p.id)
-                    }} title="Delete">X</Btn>
+                    }} title="Delete" aria-label="Delete"><Icon name="trash" size={14} /></Btn>
                   </div>
                 ))}
                 {presets.length === 0 && <div className="hint" style={{ textAlign: 'center' }}>No presets saved.</div>}
@@ -293,7 +294,7 @@ export function EditorWorkspace({
 
           {mode === 'draw' && (
             <>
-              <Section title="Draw tools" icon="brush">
+              <Section title={t('drawTools')} icon="brush">
                 <div className="tool-grid">
                   {DRAW_TOOLS.map((t) => (
                     <button
@@ -302,7 +303,7 @@ export function EditorWorkspace({
                       onClick={() => drawing.setTool(t.id)}
                       title={t.label}
                     >
-                      <PixIcon grid={ICONS[t.icon]} px={2.5} color={drawing.tool === t.id ? 'var(--accent-ink)' : 'var(--ink-dim)'} />
+                      <Icon name={t.icon} size={19} />
                       <span>{t.label}</span>
                     </button>
                   ))}
@@ -322,13 +323,13 @@ export function EditorWorkspace({
                 </div>
 
                 <div className="row-btns">
-                  <Btn size="sm" variant="outline" icon="undo" full onClick={drawing.undo} disabled={!drawing.canUndo}>Undo</Btn>
-                  <Btn size="sm" variant="outline" icon="redo" full onClick={drawing.redo} disabled={!drawing.canRedo}>Redo</Btn>
-                  <Btn size="sm" variant="outline" icon="trash" full onClick={drawing.clear}>Clear</Btn>
+                  <Btn size="sm" variant="outline" icon="undo" full onClick={drawing.undo} disabled={!drawing.canUndo}>{t('undo')}</Btn>
+                  <Btn size="sm" variant="outline" icon="redo" full onClick={drawing.redo} disabled={!drawing.canRedo}>{t('redo')}</Btn>
+                  <Btn size="sm" variant="outline" icon="trash" full onClick={drawing.clear}>{t('clear')}</Btn>
                 </div>
               </Section>
 
-              <Section title="Color" icon="picker">
+              <Section title={t('color')} icon="picker">
                 <ColorRow label="Active" value={drawing.activeColor} onChange={drawing.setActiveColor} />
                 <div className="swatch-grid" style={{ marginTop: 8 }}>
                   {QUICK_SWATCHES.map((c) => (
@@ -343,7 +344,7 @@ export function EditorWorkspace({
                 </div>
               </Section>
 
-              <Section title="Tiling guide" icon="grid" defaultOpen={false}>
+              <Section title={t('tilingGuide')} icon="grid" defaultOpen={false}>
                 <ul className="tiling-tips" style={{ marginTop: 0 }}>
                   <li>Make opposite edges match.</li>
                   <li>Keep features away from borders.</li>
@@ -356,7 +357,7 @@ export function EditorWorkspace({
             </>
           )}
 
-          <Section title="AI Generator" icon="spark" defaultOpen={false}>
+          <Section title={t('aiGenerator')} icon="spark" defaultOpen={false}>
             <Suspense fallback={<div className="ai-hint">Loading AI…</div>}>
               {mode === 'draw'
                 ? <AITilePanel tileSize={tileSize} paletteHint={biome.colors} onGenerated={onAITile} />
@@ -479,7 +480,7 @@ export function EditorWorkspace({
 
       <aside className="panel">
         <div className="panel-scroll">
-          <Section title={`Preview · ${cols} × ${rows}`} icon="image">
+          <Section title={`${t('preview')} · ${cols} × ${rows}`} icon="image">
             <div className="preview-wrap">
               <SheetCanvas tiles={tiles} tileSize={tileSize} scale={3} className="preview-canvas"
                 onSelectTile={onEditTile} markedTiles={overriddenTiles} frames={animFrames} active={active} smooth={biome.smooth || false} />
@@ -492,7 +493,7 @@ export function EditorWorkspace({
             </div>
           </Section>
 
-          <Section title="Export" icon="download">
+          <Section title={t('export')} icon="download">
             <label className="field-label">Format</label>
             <Segmented
               full
@@ -513,7 +514,7 @@ export function EditorWorkspace({
               <span>Output</span>
               <b>{(exportFormat === '16' ? 4 : cols) * tileSize * exportScale} × {(exportFormat === '16' ? 4 : rows) * tileSize * exportScale}px</b>
             </div>
-            <Btn variant="primary" icon="download" full style={{ marginTop: 10 }} onClick={handleExport}>Export PNG</Btn>
+            <Btn variant="primary" icon="download" full style={{ marginTop: 10 }} onClick={handleExport}>{t('export')} PNG</Btn>
           </Section>
         </div>
       </aside>

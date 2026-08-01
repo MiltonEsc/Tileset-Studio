@@ -1,9 +1,9 @@
 /* @refresh reset */
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
-import { PixIcon }   from './components/ui/PixIcon.jsx'
 import { Segmented } from './components/ui/Segmented.jsx'
 import { ProjectModal } from './components/ui/ProjectModal.jsx'
-import { ICONS }     from './components/ui/icons.js'
+import { Icon }      from './components/ui/Icon.jsx'
+import { useI18n }   from './i18n.jsx'
 import { EditorWorkspace } from './components/Editor/EditorWorkspace.jsx'
 import { GalleryDock }     from './components/BiomeGallery/GalleryDock.jsx'
 
@@ -17,6 +17,7 @@ import { useLevelMap }      from './hooks/useLevelMap.js'
 import { useAssets }        from './hooks/useAssets.js'
 import { useTilesets }      from './hooks/useTilesets.js'
 import { useLevels }        from './hooks/useLevels.js'
+import { useStamps }        from './hooks/useStamps.js'
 import { BIOMES, BIOME_MAP, DEFAULT_BIOME, GROUND_TEMPLATES } from './constants/biomes.js'
 import { GENERATORS }       from './core/levelGenerator.js'
 import { clampCellPx }      from './components/Level/zoomConfig.js'
@@ -206,7 +207,12 @@ const readUI = (key, fallback) => {
   try { return localStorage.getItem(`ts.ui.${key}`) || fallback } catch { return fallback }
 }
 
+const readLocalJson = (key, fallback) => {
+  try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback }
+}
+
 export default function App({ auth = null }) {
+  const { t, language, setLanguage } = useI18n()
   // Theme state: 'dark' (noche) or 'light' (día)
   const [theme, setTheme] = useState(() => readUI('theme', 'dark'))
   const toggleTheme = useCallback(() => setTheme(prev => (prev === 'dark' ? 'light' : 'dark')), [])
@@ -237,6 +243,14 @@ export default function App({ auth = null }) {
   const assets    = useAssets()
   const tilesets  = useTilesets()
   const levels    = useLevels()
+  const stamps    = useStamps()
+  const [pendingStamp, setPendingStamp] = useState(null)
+  const localOwner = auth?.user?.id || 'local'
+  const recoveryKey = `ts.levelRecovery.v1.${localOwner}`
+  const snapshotsKey = `ts.levelSnapshots.v1.${localOwner}`
+  const [recoveryDraft, setRecoveryDraft] = useState(() => readLocalJson(recoveryKey, null))
+  const [levelSnapshots, setLevelSnapshots] = useState(() => readLocalJson(snapshotsKey, []))
+  const [lastLevelSavedAt, setLastLevelSavedAt] = useState(null)
 
   // Per-tile overrides: hand-edited pixels for individual sheet tiles, applied
   // over whatever the generators produce. `overrideDraw` is a second drawing
@@ -464,6 +478,7 @@ export default function App({ auth = null }) {
   const handleTileSizeChange = (newSize) => {
     if (newSize === tileSize) return
     setTileSize(newSize)
+    if (activeLevelId || activeView === 'level') level.markDirty()
     // High-res tiles on a big level can blow past the browser/WebGL canvas limit
     // (~16384 px per side). Warn instead of silently failing to render.
     const MAX_CANVAS_PX = 16384
@@ -476,6 +491,7 @@ export default function App({ auth = null }) {
   // Startup "New Project" dialog: set the chosen grid (regen happens here, once)
   // and name, then close. The header GRID selector stays free to change it later.
   const handleProjectConfirm = ({ name, size }) => {
+    if (name !== projectName && activeLevelId) level.markDirty()
     setProjectName(name)
     handleTileSizeChange(size) // no-ops if size is unchanged
     setProjectModalOpen(false)
@@ -726,6 +742,12 @@ export default function App({ auth = null }) {
     }
   }, [mode, drawing.committedPixels, editorTileset, aiTextures, drawAiMeta, tileOverrides, animFrameCount])
 
+  const fallbackLevelTileset = useMemo(() => ({
+    name: editorTileset.name,
+    tileSize,
+    definition: currentTilesetDefinition(),
+  }), [editorTileset.name, tileSize, currentTilesetDefinition])
+
   // `generate` controls whether the 48-tile sheet is rendered here. The editor
   // tileset-load path passes false because the saved-tileset effect regenerates
   // once afterwards; the level-load path keeps it true (that effect is inactive
@@ -915,11 +937,8 @@ export default function App({ auth = null }) {
     tileSize,
   ])
 
-  const handleSaveLevel = useCallback(async (name) => {
-    if (!level.layers.length) return
-    const row = await levels.save({
-      id: activeLevelId,
-      name, width: level.width, height: level.height, tileSize,
+  const serializeCurrentLevel = useCallback((name = projectName) => ({
+      name, width: level.width, height: level.height, tile_size: tileSize,
       layers: level.layers.map(layer => {
         const manualOut = new Uint8ClampedArray(layer.manualTiles.length)
         for (let i = 0; i < layer.manualTiles.length; i++) manualOut[i] = layer.manualTiles[i] + 1
@@ -928,26 +947,71 @@ export default function App({ auth = null }) {
           name: layer.name,
           kind: layer.kind || 'autotile',
           visible: layer.visible !== false,
+          locked: !!layer.locked,
+          opacity: layer.opacity ?? 1,
+          collision: !!layer.collision,
+          group: layer.group || '',
           tileset: layer.tileset,
           gridB64: bytesToBase64(layer.grid),
           manualTilesB64: bytesToBase64(manualOut),
         }
       }),
-      placedProps: level.placedProps,
-      seamlessEdges: level.seamlessEdges,
+      placed_props: level.placedProps,
+      seamless_edges: level.seamlessEdges,
+    }), [level.width, level.height, level.layers, level.placedProps, level.seamlessEdges, tileSize, projectName])
+
+  const createLevelSnapshot = useCallback((label = 'Manual snapshot', payloadOverride = null) => {
+    const snapshotEntry = {
+      id: globalThis.crypto?.randomUUID?.() || `snapshot-${Date.now()}`,
+      levelId: payloadOverride?.id || activeLevelId,
+      label,
+      createdAt: new Date().toISOString(),
+      payload: payloadOverride || serializeCurrentLevel(projectName),
+    }
+    setLevelSnapshots(prev => {
+      const next = [snapshotEntry, ...prev].slice(0, 12)
+      try { localStorage.setItem(snapshotsKey, JSON.stringify(next)) } catch { /* recovery remains best effort */ }
+      return next
+    })
+    return snapshotEntry
+  }, [activeLevelId, serializeCurrentLevel, projectName, snapshotsKey])
+
+  const removeLevelSnapshot = useCallback((id) => {
+    setLevelSnapshots(prev => {
+      const next = prev.filter(item => item.id !== id)
+      try { localStorage.setItem(snapshotsKey, JSON.stringify(next)) } catch { /* optional */ }
+      return next
+    })
+  }, [snapshotsKey])
+
+  const handleSaveLevel = useCallback(async (name, mode = 'save') => {
+    if (!level.layers.length) return null
+    const revisionAtSave = level.revision
+    const targetId = mode === 'saveAs' || mode === 'new' ? null : activeLevelId
+    const serialized = serializeCurrentLevel(name)
+    const row = await levels.save({
+      id: targetId,
+      name: serialized.name, width: serialized.width, height: serialized.height, tileSize: serialized.tile_size,
+      layers: serialized.layers, placedProps: serialized.placed_props, seamlessEdges: serialized.seamless_edges,
     })
     if (row) {
       setActiveLevelId(row.id)
       setProjectName(row.name)
+      setLastLevelSavedAt(row.updated_at || new Date().toISOString())
+      level.markClean(revisionAtSave)
+      try { localStorage.removeItem(recoveryKey) } catch { /* optional */ }
+      setRecoveryDraft(null)
     }
-  }, [levels, level, tileSize, activeLevelId])
+    return row
+  }, [levels, level, activeLevelId, serializeCurrentLevel, recoveryKey])
 
   const handleLoadLevel = useCallback((row) => {
     const size = row.tile_size || tileSize
     let loadedLayers
     if (row.layers?.length > 0) {
       loadedLayers = row.layers.map(l => ({
-        id: l.id, name: l.name, visible: l.visible !== false, tileset: l.tileset || null,
+        id: l.id, name: l.name, visible: l.visible !== false, locked: !!l.locked,
+        opacity: l.opacity ?? 1, collision: !!l.collision, group: l.group || '', tileset: l.tileset || null,
         kind: l.kind || 'autotile',
         grid: new Uint8Array(base64ToBytes(l.gridB64 || '')),
         manualTiles: l.manualTilesB64
@@ -972,11 +1036,59 @@ export default function App({ auth = null }) {
     drawing.resetCanvas(size)
     if (mainDef) { const bytes = applyTilesetDefinition(mainDef, size); if (bytes) drawing.loadPixels(bytes) }
     level.loadState({ width: row.width, height: row.height, layers: loadedLayers, placedProps: row.placed_props })
-    level.setSeamlessEdges(!!row.seamless_edges)
+    level.setSeamlessEdges(!!row.seamless_edges, false)
     setSelectedPropId(null)
     setActiveLevelId(row.id)
     setProjectName(row.name)
-  }, [drawing, applyTilesetDefinition, level, tileSize])
+    setLastLevelSavedAt(row.updated_at || row.created_at || null)
+    try { localStorage.removeItem(recoveryKey) } catch { /* optional */ }
+    setRecoveryDraft(null)
+  }, [drawing, applyTilesetDefinition, level, tileSize, recoveryKey])
+
+  const restoreLevelSnapshot = useCallback((entry) => {
+    if (!entry?.payload) return
+    const linkedId = entry.levelId && (levels.loading || levels.levels.some(row => row.id === entry.levelId)) ? entry.levelId : null
+    handleLoadLevel({ ...entry.payload, id: linkedId })
+    level.markDirty()
+    showLevelNotice(`Restored snapshot from ${new Date(entry.createdAt).toLocaleString()}.`)
+  }, [handleLoadLevel, level, levels.loading, levels.levels, showLevelNotice])
+
+  const restoreRecoveryDraft = useCallback(() => {
+    if (!recoveryDraft?.payload) return
+    const linkedId = recoveryDraft.levelId && (levels.loading || levels.levels.some(row => row.id === recoveryDraft.levelId)) ? recoveryDraft.levelId : null
+    handleLoadLevel({ ...recoveryDraft.payload, id: linkedId })
+    level.markDirty()
+    setRecoveryDraft(null)
+    showLevelNotice('Local recovery restored. Save it when ready.')
+  }, [recoveryDraft, handleLoadLevel, level, levels.loading, levels.levels, showLevelNotice])
+
+  const discardRecoveryDraft = useCallback(() => {
+    try { localStorage.removeItem(recoveryKey) } catch { /* optional */ }
+    setRecoveryDraft(null)
+  }, [recoveryKey])
+
+  useEffect(() => {
+    if (!level.isDirty) return undefined
+    const timer = window.setTimeout(() => {
+      const draft = {
+        savedAt: new Date().toISOString(), levelId: activeLevelId,
+        revision: level.revision, payload: serializeCurrentLevel(projectName),
+      }
+      try {
+        localStorage.setItem(recoveryKey, JSON.stringify(draft))
+      } catch {
+        showLevelNotice('Local recovery could not be written (browser storage is full).')
+      }
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [level.isDirty, level.revision, activeLevelId, serializeCurrentLevel, projectName, recoveryKey, showLevelNotice])
+
+  useEffect(() => {
+    if (!level.isDirty) return undefined
+    const warn = (event) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [level.isDirty])
 
   const handleExportLevel = useCallback(() => {
     if (!level.layers.length) return
@@ -993,6 +1105,10 @@ export default function App({ auth = null }) {
           name: layer.name,
           kind: layer.kind || 'autotile',
           visible: layer.visible !== false,
+          locked: !!layer.locked,
+          opacity: layer.opacity ?? 1,
+          collision: !!layer.collision,
+          group: layer.group || '',
           tileset: layer.tileset,
           gridB64: bytesToBase64(layer.grid),
           manualTilesB64: bytesToBase64(manualOut),
@@ -1201,6 +1317,22 @@ export default function App({ auth = null }) {
       tilesetsError={tilesets.error}
       propsLoading={assets.loading}
       propsError={assets.error}
+      showStamps={activeView === 'level'}
+      stamps={stamps.stamps}
+      stampsLoading={stamps.loading}
+      stampsError={stamps.error}
+      onRemoveStamp={stamps.remove}
+      onSelectStamp={(stamp) => {
+        if (stamp.payload?.version !== 1 || !stamp.payload?.width || !stamp.payload?.height) {
+          showLevelNotice(`"${stamp.name}" is not a supported stamp.`)
+          return
+        }
+        if ((stamp.tile_size || stamp.payload?.tileSize) !== tileSize) {
+          showLevelNotice(`"${stamp.name}" uses ${stamp.tile_size || stamp.payload?.tileSize}px tiles; this level uses ${tileSize}px.`)
+          return
+        }
+        setPendingStamp({ stamp, nonce: Date.now() })
+      }}
     />
   )
 
@@ -1208,7 +1340,7 @@ export default function App({ auth = null }) {
     <div className="app" data-theme={theme}>
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark"><PixIcon grid={ICONS.grid} px={3} color="#06150f" /></div>
+          <div className="brand-mark"><Icon name="grid" size={20} /></div>
           <span className="brand-name">Tileset Studio</span>
         </div>
 
@@ -1224,9 +1356,9 @@ export default function App({ auth = null }) {
             }
           }}
           options={[
-            { value: 'tileset', label: '🎨 Tileset' },
-            { value: 'prop', label: '📦 Assets' },
-            { value: 'level', label: '🗺️ Niveles' }
+            { value: 'tileset', label: t('tileset'), icon: 'grid' },
+            { value: 'prop', label: t('assets'), icon: 'image' },
+            { value: 'level', label: t('levels'), icon: 'layers' }
           ]}
         />
 
@@ -1235,18 +1367,22 @@ export default function App({ auth = null }) {
         <button
           className="theme-toggle-btn"
           onClick={toggleTheme}
-          title={theme === 'dark' ? 'Cambiar a Modo Día (Light)' : 'Cambiar a Modo Noche (Dark)'}
+          title={theme === 'dark' ? t('light') : t('dark')}
         >
-          <span className="theme-toggle-icon">{theme === 'dark' ? '☀️' : '🌙'}</span>
-          <span className="theme-toggle-label">{theme === 'dark' ? 'Día' : 'Noche'}</span>
+          <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
+          <span className="theme-toggle-label">{theme === 'dark' ? t('light') : t('dark')}</span>
         </button>
+
+        <select className="language-select" value={language} onChange={e => setLanguage(e.target.value)} aria-label={t('language')} title={t('language')}>
+          <option value="es">ES</option><option value="en">EN</option>
+        </select>
 
         <button className="project-new-btn" onClick={() => setProjectModalOpen(true)} title="New project (choose tile size)">
           {projectName}
         </button>
 
         <div className="topgroup">
-          <span className="group-label">GRID</span>
+          <span className="group-label">{t('grid')}</span>
           <Segmented size="sm" value={tileSize} onChange={handleTileSizeChange}
             options={[{ value: 8, label: '8' }, { value: 16, label: '16' }, { value: 32, label: '32' }, { value: 64, label: '64' }]} />
         </div>
@@ -1254,8 +1390,8 @@ export default function App({ auth = null }) {
         {auth?.user && (
           <div className="topgroup account-group">
             <span className="account-email" title={auth.user.email}>{auth.user.email}</span>
-            <button className="account-signout" onClick={auth.signOut} title="Sign out">
-              Sign out
+            <button className="account-signout" onClick={auth.signOut} title={t('signOut')}>
+              {t('signOut')}
             </button>
           </div>
         )}
@@ -1317,13 +1453,33 @@ export default function App({ auth = null }) {
               onTerrainFill={handleTerrainFill} onTerrainRect={handleTerrainRect} onTerrainPick={handleTerrainPick}
               onFillActiveLayer={handleFillActiveLayer} onClearActiveLayer={handleClearActiveLayer}
               onSurprise={handleSurprise}
-              levels={levels.levels} onSaveLevel={handleSaveLevel} onLoadLevel={handleLoadLevel} onRemoveLevel={levels.remove}
+              levels={levels.levels} onSaveLevel={handleSaveLevel} onLoadLevel={handleLoadLevel} onRemoveLevel={async id => {
+                await levels.remove(id)
+                if (id === activeLevelId) { setActiveLevelId(null); setLastLevelSavedAt(null); level.markDirty() }
+              }}
               onExportLevel={handleExportLevel} onImportLevel={handleImportLevel}
               levelsLoading={levels.loading} levelsError={levels.error}
               onTileSizeChange={handleTileSizeChange} levelNotice={levelNotice}
               tileVariation={tileVariation} setTileVariation={setTileVariation}
               active={showLevel}
               smooth={layerTiles.some(lt => lt?.smooth)}
+              fallbackTileset={fallbackLevelTileset}
+              onNotice={showLevelNotice}
+              pendingStamp={pendingStamp}
+              onStampConsumed={() => setPendingStamp(null)}
+              onSaveStamp={(name, payload) => stamps.save({ name, payload })}
+              levelIdentity={activeLevelId}
+              activeLevelId={activeLevelId}
+              projectName={projectName}
+              isDirty={level.isDirty || !activeLevelId}
+              lastSavedAt={lastLevelSavedAt}
+              recoveryDraft={recoveryDraft}
+              onRestoreRecovery={restoreRecoveryDraft}
+              onDiscardRecovery={discardRecoveryDraft}
+              snapshots={levelSnapshots}
+              onCreateSnapshot={createLevelSnapshot}
+              onRestoreSnapshot={restoreLevelSnapshot}
+              onRemoveSnapshot={removeLevelSnapshot}
             />
           </Suspense>
         </div>

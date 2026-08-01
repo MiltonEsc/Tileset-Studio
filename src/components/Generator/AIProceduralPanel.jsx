@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { generateBaseTileWithAI, processImageToTile, DITHER_OPTIONS } from '../../core/aiTile.js'
 import { fileToRgba } from '../../core/imageImport.js'
+import { PIXEL_SNAPPER_COLOR_OPTIONS, snapImageFile } from '../../core/pixelSnapper.js'
 import { rawToPreview } from '../../core/exportRaw.js'
 import { useAIModel } from '../../hooks/useAIModel.js'
 import { RawAIPreview } from './RawAIPreview.jsx'
@@ -21,6 +22,9 @@ export function AIProceduralPanel({ tileSize, paletteHint, onGenerated, onRecolo
   const [preview, setPreview] = useState(null)
   const [imageFile, setImageFile] = useState(null)
   const [smooth, setSmooth] = useState(false)
+  const [usePixelSnapper, setUsePixelSnapper] = useState(true)
+  const [snapColors, setSnapColors] = useState(16)
+  const [snapPixelSize, setSnapPixelSize] = useState('')
   const { model, setModel, loading, error, run, models } = useAIModel()
 
   // Shared sink for both AI generation and image import. `recolor` decides what
@@ -60,8 +64,18 @@ export function AIProceduralPanel({ tileSize, paletteHint, onGenerated, onRecolo
   const handleImport = async (recolor = false) => {
     if (!imageFile) return
     const result = await run(async () => {
-      const rgba = await fileToRgba(imageFile)
-      return processImageToTile({ ...rgba, tileSize, role: 'center', dither, smooth })
+      const snapped = usePixelSnapper && !smooth
+      const rgba = snapped
+        ? await snapImageFile(imageFile, { colorCount: snapColors, pixelSize: snapPixelSize })
+        : await fileToRgba(imageFile)
+      return processImageToTile({
+        ...rgba,
+        tileSize,
+        role: 'center',
+        dither,
+        smooth,
+        source: snapped ? 'pixel-snapper' : 'import',
+      })
     })
     if (result) applyResult(result, recolor)
   }
@@ -136,6 +150,31 @@ export function AIProceduralPanel({ tileSize, paletteHint, onGenerated, onRecolo
           </div>
         </div>
         <label className="ai-smooth-toggle" style={{ marginTop: 8 }}>
+          <input type="checkbox" checked={usePixelSnapper && !smooth} disabled={loading || smooth}
+            onChange={e => setUsePixelSnapper(e.target.checked)} />
+          <span>Pixel Snapper (real pixel grid)</span>
+        </label>
+        {usePixelSnapper && !smooth && (
+          <div className="ai-snap-options">
+            <label>
+              <span>Palette</span>
+              <select className="ai-model" value={snapColors} disabled={loading}
+                onChange={e => setSnapColors(Number(e.target.value))}>
+                {PIXEL_SNAPPER_COLOR_OPTIONS.map(value => (
+                  <option key={value} value={value}>{value} colors</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>AI pixel size</span>
+              <input className="ai-model" type="number" min="1" step="0.5" value={snapPixelSize}
+                placeholder="Auto" disabled={loading}
+                onChange={e => setSnapPixelSize(e.target.value)} />
+            </label>
+            <div className="ai-hint">Auto detects the fake AI pixel grid. Set a size only when detection misses it.</div>
+          </div>
+        )}
+        <label className="ai-smooth-toggle" style={{ marginTop: 8 }}>
           <input type="checkbox" checked={smooth} disabled={loading}
             onChange={e => setSmooth(e.target.checked)} />
           <span>Smooth (no pixelizing)</span>
@@ -163,7 +202,12 @@ export function AIProceduralPanel({ tileSize, paletteHint, onGenerated, onRecolo
 
       {error && <div className="ai-error">{error}</div>}
 
-      <RawAIPreview items={[{ label: 'Texture', preview }]} />
+      <RawAIPreview
+        items={[{ label: preview?.provider === 'pixel-snapper' ? 'Pixel Snapper' : 'Texture', preview }]}
+        hint={preview?.provider === 'pixel-snapper'
+          ? 'Grid-snapped pixel art used by the procedural tileset:'
+          : undefined}
+      />
     </div>
   )
 }

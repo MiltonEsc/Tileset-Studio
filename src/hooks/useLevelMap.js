@@ -1,19 +1,37 @@
 import { useState, useCallback, useRef, useReducer } from 'react'
 import { createGrid } from '../core/autotile.js'
 import { GENERATORS } from '../core/levelGenerator.js'
+import {
+  captureRegion as captureRegionData,
+  applyRegionToState,
+  deleteRegionFromState,
+  transformRegionPayload,
+} from '../core/levelSelection.js'
 
 const HISTORY_LIMIT = 60
 
+function compatibleTilesets(a, b) {
+  if (a === b) return true
+  if (!a || !b) return false
+  if (a.savedId || b.savedId) return !!a.savedId && a.savedId === b.savedId
+  return a.name === b.name && (a.tileSize || 0) === (b.tileSize || 0)
+}
+
 let _lid = 0
-function makeLayer(name, w, h, tileset = null, kind = 'autotile') {
+function makeLayer(name, w, h, tileset = null, kind = 'autotile', props = {}) {
   return {
     id: `layer-${++_lid}`,
     name,
     kind,
     visible: true,
+    locked: false,
+    opacity: 1,
+    collision: false,
+    group: '',
     tileset,
     grid: createGrid(w, h),
     manualTiles: new Int16Array(w * h).fill(-1),
+    ...props,
   }
 }
 
@@ -48,6 +66,20 @@ export function useLevelMap(initialW = 32, initialH = 20) {
   const undoStack = useRef([])
   const redoStack = useRef([])
   const [, bumpHistory] = useReducer(v => v + 1, 0)
+  const revisionRef = useRef(0)
+  const [revision, setRevision] = useState(0)
+  const [cleanRevision, setCleanRevision] = useState(0)
+
+  const markDirty = useCallback(() => {
+    const next = revisionRef.current + 1
+    revisionRef.current = next
+    setRevision(next)
+    return next
+  }, [])
+
+  const markClean = useCallback((savedRevision = revisionRef.current) => {
+    setCleanRevision(savedRevision)
+  }, [])
 
   const snapshot = useCallback(() => ({
     width: wRef.current,
@@ -63,7 +95,8 @@ export function useLevelMap(initialW = 32, initialH = 20) {
     if (undoStack.current.length > HISTORY_LIMIT) undoStack.current.shift()
     redoStack.current = []
     bumpHistory()
-  }, [])
+    markDirty()
+  }, [markDirty])
 
   const resetHistory = useCallback(() => {
     undoStack.current = []
@@ -130,7 +163,8 @@ export function useLevelMap(initialW = 32, initialH = 20) {
     redoStack.current.push(snapshot())
     restore(undoStack.current.pop())
     bumpHistory()
-  }, [discardStrokeBuffer, snapshot, restore])
+    markDirty()
+  }, [discardStrokeBuffer, snapshot, restore, markDirty])
 
   const redo = useCallback(() => {
     if (!redoStack.current.length) return
@@ -138,7 +172,8 @@ export function useLevelMap(initialW = 32, initialH = 20) {
     undoStack.current.push(snapshot())
     restore(redoStack.current.pop())
     bumpHistory()
-  }, [discardStrokeBuffer, snapshot, restore])
+    markDirty()
+  }, [discardStrokeBuffer, snapshot, restore, markDirty])
 
   // Returns the mutable grid buffer for the active layer (lazy-init).
   const ensureGridBuf = useCallback((layerIdx) => {
@@ -178,7 +213,7 @@ export function useLevelMap(initialW = 32, initialH = 20) {
     discardStrokeBuffer()
     const idx = aiRef.current
     const layer = lRef.current[idx]
-    if (!layer) return
+    if (!layer || layer.locked) return
     const patch = patchFn(layer)
     if (!patch) return
     pushHistory(snapshot())
@@ -191,14 +226,14 @@ export function useLevelMap(initialW = 32, initialH = 20) {
   }, [discardStrokeBuffer, pushHistory, snapshot])
 
   // ── Layer CRUD ─────────────────────────────────────────────────────────────
-  const addLayer = useCallback((tileset = null, kind = 'autotile') => {
+  const addLayer = useCallback((tileset = null, kind = 'autotile', props = {}) => {
     discardStrokeBuffer()
     pushHistory(snapshot())
     const newIdx = lRef.current.length
     setLayers(prev => {
       const w = wRef.current, h = hRef.current
       const label = kind === 'manual' ? 'Layer' : 'Autotile'
-      return [...prev, makeLayer(`${label} ${prev.length + 1}`, w, h, tileset, kind)]
+      return [...prev, makeLayer(`${label} ${prev.length + 1}`, w, h, tileset, kind, props)]
     })
     setActiveLayerIdx(newIdx)
   }, [discardStrokeBuffer, pushHistory, snapshot])
@@ -230,12 +265,32 @@ export function useLevelMap(initialW = 32, initialH = 20) {
   }, [discardStrokeBuffer, pushHistory, snapshot])
 
   const setLayerProp = useCallback((idx, props) => {
+    if (!lRef.current[idx]) return
+    pushHistory(snapshot())
     setLayers(prev => prev.map((l, i) => i === idx ? { ...l, ...props } : l))
-  }, [])
+  }, [pushHistory, snapshot])
 
   const setLayerName = useCallback((idx, name) => {
+    if (!lRef.current[idx] || lRef.current[idx].name === name) return
+    pushHistory(snapshot())
     setLayers(prev => prev.map((l, i) => i === idx ? { ...l, name } : l))
-  }, [])
+  }, [pushHistory, snapshot])
+
+  const setLayerVisibility = useCallback((visibility, recordHistory = true) => {
+    const nextValues = typeof visibility === 'function'
+      ? visibility(lRef.current.map(layer => layer.visible !== false))
+      : visibility
+    if (!Array.isArray(nextValues) || nextValues.length !== lRef.current.length) return
+    if (lRef.current.every((layer, idx) => (layer.visible !== false) === !!nextValues[idx])) return
+    if (recordHistory) pushHistory(snapshot())
+    setLayers(prev => prev.map((layer, idx) => ({ ...layer, visible: !!nextValues[idx] })))
+  }, [pushHistory, snapshot])
+
+  const updateSeamlessEdges = useCallback((value, recordHistory = true) => {
+    if (seRef.current === value) return
+    if (recordHistory) pushHistory(snapshot())
+    setSeamlessEdges(value)
+  }, [pushHistory, snapshot])
 
   // ── Terrain paint — buffered, flush via RAF ────────────────────────────────
   const paintArea = useCallback((cx, cy, value, brushSize = 1) => {
@@ -500,6 +555,91 @@ export function useLevelMap(initialW = 32, initialH = 20) {
     setPlacedProps([])
   }, [pushHistory, snapshot])
 
+  // ── Rectangular multi-layer selection transactions ────────────────────────
+  // Selection UI state stays outside this hook; only committed data operations
+  // live here so every paste/move/delete/transform is exactly one undo entry.
+  const captureRegion = useCallback((rect, layerIds, includeProps, tileSize, effectiveTilesets, assetsById, sourceLevelId) => (
+    captureRegionData({
+      width: wRef.current, height: hRef.current,
+      layers: lRef.current, placedProps: ppRef.current,
+      rect, layerIds, includeProps, tileSize, effectiveTilesets, assetsById, sourceLevelId,
+    })
+  ), [])
+
+  const commitRegionResult = useCallback((result) => {
+    if (!result || result.error) return result
+    discardStrokeBuffer()
+    pushHistory(snapshot())
+    setWidth(result.width)
+    setHeight(result.height)
+    setLayers(result.layers)
+    setPlacedProps(result.placedProps)
+    return result
+  }, [discardStrokeBuffer, pushHistory, snapshot])
+
+  const duplicateLayer = useCallback((idx) => {
+    const source = lRef.current[idx]
+    if (!source) return
+    discardStrokeBuffer(); pushHistory(snapshot())
+    const copy = { ...source, id: `layer-${++_lid}`, name: `${source.name} copy`, grid: new Uint8Array(source.grid), manualTiles: new Int16Array(source.manualTiles) }
+    setLayers(prev => [...prev.slice(0, idx + 1), copy, ...prev.slice(idx + 1)])
+    setActiveLayerIdx(idx + 1)
+  }, [discardStrokeBuffer, pushHistory, snapshot])
+
+  const reorderLayer = useCallback((from, to) => {
+    if (from === to || from < 0 || to < 0 || from >= lRef.current.length || to >= lRef.current.length) return
+    discardStrokeBuffer(); pushHistory(snapshot())
+    setLayers(prev => { const next = [...prev]; const [item] = next.splice(from, 1); next.splice(to, 0, item); return next })
+    setActiveLayerIdx(prev => prev === from ? to : prev > from && prev <= to ? prev - 1 : prev < from && prev >= to ? prev + 1 : prev)
+  }, [discardStrokeBuffer, pushHistory, snapshot])
+
+  const mergeManualLayerDown = useCallback((idx) => {
+    const top = lRef.current[idx], bottom = lRef.current[idx - 1]
+    if (!top || !bottom || top.kind !== 'manual' || bottom.kind !== 'manual' || !compatibleTilesets(top.tileset, bottom.tileset)) return
+    discardStrokeBuffer(); pushHistory(snapshot())
+    const merged = new Int16Array(bottom.manualTiles)
+    for (let i = 0; i < merged.length; i++) if (top.manualTiles[i] >= 0) merged[i] = top.manualTiles[i]
+    setLayers(prev => prev.filter((_, i) => i !== idx).map((layer, i) => i === idx - 1 ? { ...layer, manualTiles: merged } : layer))
+    setActiveLayerIdx(Math.max(0, idx - 1))
+  }, [discardStrokeBuffer, pushHistory, snapshot])
+
+  const applyRegion = useCallback((payload, options) => {
+    const result = applyRegionToState({
+      width: wRef.current, height: hRef.current,
+      layers: lRef.current, placedProps: ppRef.current,
+    }, payload, options)
+    return commitRegionResult(result)
+  }, [commitRegionResult])
+
+  const deleteRegion = useCallback((rect, layerIds, includeProps = true) => {
+    const result = deleteRegionFromState({
+      width: wRef.current, height: hRef.current,
+      layers: lRef.current, placedProps: ppRef.current,
+    }, rect, layerIds, includeProps)
+    return commitRegionResult(result)
+  }, [commitRegionResult])
+
+  const cutRegion = useCallback((rect, layerIds, includeProps, tileSize, effectiveTilesets, assetsById, sourceLevelId) => {
+    const payload = captureRegion(rect, layerIds, includeProps, tileSize, effectiveTilesets, assetsById, sourceLevelId)
+    deleteRegion(rect, layerIds, includeProps)
+    return payload
+  }, [captureRegion, deleteRegion])
+
+  const transformRegion = useCallback((rect, layerIds, includeProps, operation, context = {}) => {
+    const payload = captureRegion(rect, layerIds, includeProps, context.tileSize, context.effectiveTilesets, context.assetsById, context.sourceLevelId)
+    const transformed = transformRegionPayload(payload, operation)
+    return applyRegion(transformed, {
+      x: rect.x, y: rect.y, mode: context.mode || 'overlay',
+      clearSource: { rect, layerIds, includeProps },
+      includeProps,
+      validAssetIds: context.validAssetIds,
+      destinationTilesets: context.effectiveTilesets,
+      currentLevelId: context.sourceLevelId,
+      maxWidth: context.maxWidth,
+      maxHeight: context.maxHeight,
+    })
+  }, [captureRegion, applyRegion])
+
   // ── Load saved level ───────────────────────────────────────────────────────
   const loadState = useCallback(({ width: w, height: h, layers: ls, placedProps: pp }) => {
     discardStrokeBuffer()
@@ -508,20 +648,23 @@ export function useLevelMap(initialW = 32, initialH = 20) {
     setActiveLayerIdx(0)
     setPlacedProps(Array.isArray(pp) ? pp : [])
     resetHistory()
-  }, [discardStrokeBuffer, resetHistory])
+    markClean()
+  }, [discardStrokeBuffer, resetHistory, markClean])
 
   return {
     width, height,
     layers, activeLayerIdx, setActiveLayerIdx,
-    addLayer, removeLayer, moveLayer, setLayerProp, setLayerName,
-    seamlessEdges, setSeamlessEdges,
+    addLayer, removeLayer, moveLayer, duplicateLayer, reorderLayer, mergeManualLayerDown, setLayerProp, setLayerName, setLayerVisibility,
+    seamlessEdges, setSeamlessEdges: updateSeamlessEdges,
     startPaint, continuePaint, endStroke,
     generate, clear, fillAll, resize,
     getCell, paintArea, fillAt, fillRect,
     getManualTile, paintManualArea, fillManualAt, fillManualRect,
     clearManualTiles, clearManualArea, clearManualFill, clearManualRect, fillManualAll,
     placedProps, addProp, removeProp, updateProp, movePropZ, clearProps,
+    captureRegion, applyRegion, deleteRegion, cutRegion, transformRegion,
     loadState,
+    revision, isDirty: revision !== cleanRevision, markClean, markDirty,
     undo, redo,
     canUndo: undoStack.current.length > 0,
     canRedo: redoStack.current.length > 0,

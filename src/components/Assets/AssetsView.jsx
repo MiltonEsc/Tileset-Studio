@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
 import { Section } from '../ui/Section.jsx'
 import { Btn } from '../ui/Btn.jsx'
 import { ColorRow } from '../ui/ColorRow.jsx'
-import { PixIcon } from '../ui/PixIcon.jsx'
-import { ICONS } from '../ui/icons.js'
+import { Icon } from '../ui/Icon.jsx'
 import { AssetCanvas } from './AssetCanvas.jsx'
 import { SizeSelector } from './SizeSelector.jsx'
 import { AssetGallery } from './AssetGallery.jsx'
 import { useAssetEditor } from '../../hooks/useAssetEditor.js'
+import { useI18n } from '../../i18n.jsx'
 
 // Loads the Gemini/OpenAI request code only when the Assets view is shown.
 const AssetAIPanel = lazy(() => import('./AssetAIPanel.jsx').then(m => ({ default: m.AssetAIPanel })))
@@ -36,6 +36,7 @@ function fitZoom(pxW, pxH) {
 }
 
 export function AssetsView({ tileSize, gallery, active = true }) {
+  const { t } = useI18n()
   const [cols, setCols] = useState(2)
   const [rows, setRows] = useState(2)
   const [workTileSize, setWorkTileSize] = useState(tileSize)
@@ -103,17 +104,17 @@ export function AssetsView({ tileSize, gallery, active = true }) {
       {/* LEFT */}
       <aside className="panel">
         <div className="panel-scroll">
-          <Section title="Tools" icon="brush">
+          <Section title={t('tools')} icon="brush">
             <div className="tool-grid">
               {ATOOLS.map(t => (
                 <button key={t.id} className={`tool-btn ${editor.tool === t.id ? 'on' : ''}`} onClick={() => editor.setTool(t.id)} title={t.label}>
-                  <PixIcon grid={ICONS[t.icon]} px={2.5} color={editor.tool === t.id ? 'var(--accent-ink)' : 'var(--ink-dim)'} />
+                  <Icon name={t.icon} size={19} />
                   <span>{t.label}</span>
                 </button>
               ))}
             </div>
             <div className="asset-brush-row">
-              <label className="field-label" style={{ margin: 0 }}>Brush size</label>
+              <label className="field-label" style={{ margin: 0 }}>{t('brushSize')}</label>
               <span className="asset-pp-value">{editor.brush}px</span>
             </div>
             <input
@@ -122,12 +123,12 @@ export function AssetsView({ tileSize, gallery, active = true }) {
               style={{ width: '100%', accentColor: 'var(--accent)' }}
             />
             <div className="row-btns">
-              <Btn size="sm" variant="outline" icon="undo" full onClick={editor.undo} disabled={!editor.canUndo}>Undo</Btn>
-              <Btn size="sm" variant="outline" icon="redo" full onClick={editor.redo} disabled={!editor.canRedo}>Redo</Btn>
+              <Btn size="sm" variant="outline" icon="undo" full onClick={editor.undo} disabled={!editor.canUndo}>{t('undo')}</Btn>
+              <Btn size="sm" variant="outline" icon="redo" full onClick={editor.redo} disabled={!editor.canRedo}>{t('redo')}</Btn>
             </div>
           </Section>
 
-          <Section title="Color" icon="brush">
+          <Section title={t('color')} icon="brush">
             <ColorRow label="Active" value={editor.activeColor} onChange={editor.setActiveColor} />
             <div className="swatch-grid">
               {QUICK_SWATCHES.map(c => (
@@ -137,11 +138,11 @@ export function AssetsView({ tileSize, gallery, active = true }) {
             </div>
           </Section>
 
-          <Section title="Asset size" icon="grid">
+          <Section title={t('assetSize')} icon="grid">
             <SizeSelector cols={cols} rows={rows} tileSize={workTileSize} onChange={handleSizeChange} />
           </Section>
 
-          <Section title="Generate with AI" icon="spark">
+          <Section title={t('generateAI')} icon="spark">
             <Suspense fallback={<div className="ai-hint">Loading AI…</div>}>
               <AssetAIPanel pxW={pxW} pxH={pxH} onGenerated={handleGenerated} />
             </Suspense>
@@ -153,7 +154,7 @@ export function AssetsView({ tileSize, gallery, active = true }) {
       <main className="stage">
         <div className="stage-toolbar">
           <span className="tool-active">
-            <PixIcon grid={ICONS.brush} px={2} color="var(--accent)" /> {pxW}×{pxH}px · {cols}×{rows}
+            <Icon name="brush" size={16} /> {pxW}×{pxH}px · {cols}×{rows}
           </span>
           <div className="spacer" />
           <div className="zoom-ctrl">
@@ -192,8 +193,8 @@ export function AssetsView({ tileSize, gallery, active = true }) {
         </div>
 
         <div className="stage-actions">
-          <Btn variant="danger" icon="trash" onClick={editor.clear}>Clear</Btn>
-          <Btn variant="primary" size="lg" icon="save" onClick={handleSave}>Save to gallery</Btn>
+          <Btn variant="danger" icon="trash" onClick={editor.clear}>{t('clear')}</Btn>
+          <Btn variant="primary" size="lg" icon="save" onClick={handleSave}>{t('saveGallery')}</Btn>
         </div>
       </main>
 
