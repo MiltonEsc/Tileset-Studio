@@ -422,6 +422,25 @@
                 <output class="value" for="edgeFrequency">5</output>
               </div>
             </div>
+
+            <div class="row">
+              <label for="elevationEdge">Elevation edge</label>
+              <label class="check">
+                <input id="elevationEdge" type="checkbox" />
+                Enabled
+              </label>
+            </div>
+
+            <div class="row" id="elevationDepthRow" hidden>
+              <label for="elevationDepth">Elevation depth</label>
+              <div>
+                <div class="range-wrap">
+                  <input id="elevationDepth" type="range" min="1" max="16" value="6" />
+                  <output class="value" for="elevationDepth">6</output>
+                </div>
+                <div class="hint">Vertical face below exposed terrain edges</div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -602,6 +621,7 @@
       const layoutReadout = document.querySelector("#layoutReadout");
       const sheetMeta = document.querySelector("#sheetMeta");
       const edgePaddingRow = document.querySelector("#edgePaddingRow");
+      const elevationDepthRow = document.querySelector("#elevationDepthRow");
       const ranges = document.querySelectorAll('input[type="range"]');
       const state = {
         tileSize: 32,
@@ -796,6 +816,8 @@
           edgeStyle: state.edgeStyle,
           edgeRoughness: Number(document.querySelector("#edgeRoughness").value) * (tileSize / 32),
           edgeFrequency: Number(document.querySelector("#edgeFrequency").value),
+          elevationEdge: document.querySelector("#elevationEdge").checked,
+          elevationDepth: Number(document.querySelector("#elevationDepth").value) * (tileSize / 32),
           edgePadding: Number(document.querySelector("#edgePadding").value) * (tileSize / 16),
           baseColor: hexToRgb(document.querySelector("#baseColor").value),
           edgeColor: hexToRgb(document.querySelector("#edgeColor").value),
@@ -890,6 +912,33 @@
             const adjusted = sdf + edgeNoise;
 
             if (adjusted > 0) {
+              let elevationDepth = 0;
+              if (settings.elevationEdge) {
+                const maxDepth = Math.max(1, Math.round(settings.elevationDepth));
+                for (let depth = 1; depth <= maxDepth && ly - depth >= 0; depth += 1) {
+                  const sampleY = ly - depth;
+                  const sampleCy = cy - depth;
+                  const sampleSdf = topdown17
+                    ? topdown17Sdf(piece, lx, sampleY, tile, settings.cornerRadius, roughness, settings.edgePadding)
+                    : maskSdf(mask, lx, sampleY, tile, settings.cornerRadius, roughness);
+                  const sampleNoise = (fbm(cx / noiseSize, sampleCy / noiseSize, settings.seed + pieceSeed * 113) - 0.5) * roughness;
+                  if (sampleSdf + sampleNoise <= 0) {
+                    elevationDepth = depth;
+                    break;
+                  }
+                }
+              }
+              if (elevationDepth > 0) {
+                const depthAmount = elevationDepth / Math.max(1, settings.elevationDepth);
+                const faceBase = mixColor(settings.edgeColor, shadeColor(settings.edgeColor, -42), depthAmount);
+                const faceNoise = hash2(Math.floor(cx / 2), Math.floor(cy / 2), settings.seed + pieceSeed * 197) > 0.72 ? -12 : 0;
+                const face = shadeColor(faceBase, faceNoise);
+                data[i] = face.r;
+                data[i + 1] = face.g;
+                data[i + 2] = face.b;
+                data[i + 3] = 255;
+                continue;
+              }
               data[i] = bg.r;
               data[i + 1] = bg.g;
               data[i + 2] = bg.b;
@@ -977,6 +1026,7 @@
       function updateModeUi(settings = getSettings()) {
         const is17 = settings.tilesetType === "topdown-17";
         edgePaddingRow.hidden = !is17;
+        elevationDepthRow.hidden = !settings.elevationEdge;
         sheetMeta.innerHTML = is17 ? "17 pieces<br />5 x 5 guide sheet" : "15 pieces<br />4 x 4 mask sheet";
         layoutReadout.textContent = is17
           ? "layout single + vertical + horizontal + 3x3 island + inner corners"
@@ -1053,4 +1103,3 @@
     </script>
   </body>
 </html>
-
