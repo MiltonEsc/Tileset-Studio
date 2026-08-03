@@ -29,17 +29,18 @@ export const FAL_BASE = IS_DEV ? '/fal' : 'https://fal.run'
 export const CLOUDFLARE_BASE = IS_DEV ? '/cloudflare/client/v4' : 'https://api.cloudflare.com/client/v4'
 // Recraft V3. OpenAI-compatible images endpoint; request b64_json to skip the CDN.
 export const RECRAFT_BASE = IS_DEV ? '/recraft' : 'https://external.api.recraft.com'
-const DEFAULT_IMAGE_MODEL = 'gemini-2.5-flash-image'
+const DEFAULT_IMAGE_MODEL = 'gpt-image-2'
 const FALLBACK_IMAGE_MODEL = 'gemini-2.5-flash-image'
-const DEFAULT_QUALITY = 'high'
+const DEFAULT_QUALITY = 'low'
 const DEFAULT_OUTPUT_FORMAT = 'png'
 const MAX_TILE_COLORS = 10
 
 export const AI_MODELS = [
+  { id: 'gpt-image-2',            label: 'GPT Image 2 · Low (recommended)', provider: 'openai' },
+  { id: 'gpt-image-1-mini',       label: 'GPT Image 1 Mini · cheapest',     provider: 'openai' },
   { id: 'gemini-2.5-flash-image', label: 'Gemini 2.5 Flash Image', provider: 'gemini' },
   { id: 'gemini-3-pro-image',     label: 'Gemini 3 Pro Image',     provider: 'gemini' },
   { id: 'gpt-image-1',            label: 'GPT Image 1',            provider: 'openai' },
-  { id: 'gpt-image-1-mini',       label: 'GPT Image 1 Mini',       provider: 'openai' },
   { id: 'fal-ai/flux/schnell',    label: 'FLUX.1 schnell (fal)',   provider: 'fal' },
   { id: 'fal-ai/flux/dev',        label: 'FLUX.1 dev (fal)',       provider: 'fal' },
   { id: '@cf/stabilityai/stable-diffusion-xl-base-1.0', label: 'Stable Diffusion XL (Cloudflare)', provider: 'cloudflare' },
@@ -181,6 +182,16 @@ function openAISize(quality) {
   return '1024x1024'
 }
 
+export function buildOpenAIRequestBody(model, prompt, { quality = DEFAULT_QUALITY } = {}) {
+  return {
+    model,
+    prompt,
+    n: 1,
+    size: openAISize(quality),
+    quality,
+  }
+}
+
 async function requestOpenAIImage(apiKey, model, prompt, { quality = DEFAULT_QUALITY } = {}) {
   return fetch(`${OPENAI_BASE}/images/generations`, {
     method: 'POST',
@@ -188,13 +199,7 @@ async function requestOpenAIImage(apiKey, model, prompt, { quality = DEFAULT_QUA
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model,
-      prompt,
-      n: 1,
-      size: openAISize(quality),
-      quality,
-    }),
+    body: JSON.stringify(buildOpenAIRequestBody(model, prompt, { quality })),
   })
 }
 
@@ -462,6 +467,47 @@ export async function generateImage({
   }
 
   throw lastError || new Error('Image generation failed.')
+}
+
+// Image-to-image coloring for structured sheets. The source PNG carries the
+// exact tile geometry; GPT Image is asked to repaint it without moving cells.
+// Kept in the shared dispatcher so API-key resolution, dev proxying and image
+// decoding stay identical to the text-to-image path.
+export async function editImageWithAI({
+  imageBlob,
+  prompt,
+  model = 'gpt-image-2',
+  quality = 'low',
+  size = '1024x1024',
+}) {
+  if (!imageBlob) throw new Error('Missing source tileset image.')
+  if (!prompt?.trim()) throw new Error('Describe how GPT should color the tiles.')
+  const apiKey = resolveApiKey('openai')
+  if (!apiKey) throw new Error('Missing VITE_OPENAI_API_KEY in .env.local for GPT Image.')
+
+  const body = new FormData()
+  body.append('model', model)
+  body.append('prompt', prompt.trim())
+  body.append('image', imageBlob, 'tileset-base.png')
+  body.append('n', '1')
+  body.append('size', size)
+  body.append('quality', quality)
+  body.append('output_format', 'png')
+
+  const res = await fetch(`${OPENAI_BASE}/images/edits`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body,
+  })
+  if (!res.ok) throw new Error(await readError(res, 'openai'))
+  const json = await res.json()
+  const b64 = json?.data?.[0]?.b64_json
+  if (!b64) throw new Error('No edited image returned by the OpenAI API.')
+  const decoded = await decodeGeneratedImage(`data:image/png;base64,${b64}`, false)
+  return {
+    ...decoded,
+    meta: { provider: 'openai', model, quality, size, operation: 'edit' },
+  }
 }
 
 const clampByte = (v) => Math.max(0, Math.min(255, Math.round(v)))

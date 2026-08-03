@@ -19,7 +19,47 @@ export function gridSet(grid, w, x, y, value) {
 // Out-of-bounds neighbors are treated as `border` (0 = empty by default,
 // so map edges show borders; pass 1 to make edges seamless).
 // Returns the sheet index (0..47). Returns 0 (empty) if the cell is not solid.
-export function getTileIndex(grid, w, h, x, y, border = 0) {
+// SpriteCook's 15-piece sheet is a dual-grid corner mask. Values are source
+// sheet slots in its original 4x4 layout; mask 0 is transparent, represented
+// as -1 so it does not collide with the normal Blob-47 empty index (0).
+const DUAL_GRID_15_SLOT = new Int16Array([
+  -1, 15, 8, 9, 0, 11, 14, 7, 13, 4, 1, 10, 3, 2, 5, 6,
+])
+const CARDINAL_17_SLOT = new Int16Array([
+  20, 15, 21, 16, 5, 10, 6, 11, 23, 18, 22, 17, 8, 13, 7, 12,
+])
+
+export function autotileModeForDefinition(definition) {
+  if (definition?.autotile) return definition.autotile
+  // Backward compatibility for SpriteCook sheets saved before the explicit
+  // `autotile` marker was added.
+  if (definition?.source === 'spritecook-tileset-gen' && definition?.layout === 'topdown-15') return 'dual-grid-15'
+  if (definition?.source === 'spritecook-tileset-gen' && definition?.layout === 'topdown-17') return 'cardinal-17'
+  return 'blob47'
+}
+
+export function getDualGridTileIndex(grid, w, h, x, y, border = 0) {
+  let mask = 0
+  if (gridGet(grid, w, h, x,     y,     border)) mask |= 1
+  if (gridGet(grid, w, h, x + 1, y,     border)) mask |= 2
+  if (gridGet(grid, w, h, x,     y + 1, border)) mask |= 4
+  if (gridGet(grid, w, h, x + 1, y + 1, border)) mask |= 8
+  return DUAL_GRID_15_SLOT[mask]
+}
+
+export function getCardinal17TileIndex(grid, w, h, x, y, border = 0) {
+  if (!gridGet(grid, w, h, x, y)) return -1
+  let mask = 0
+  if (gridGet(grid, w, h, x,     y - 1, border)) mask |= 1
+  if (gridGet(grid, w, h, x + 1, y,     border)) mask |= 2
+  if (gridGet(grid, w, h, x,     y + 1, border)) mask |= 4
+  if (gridGet(grid, w, h, x - 1, y,     border)) mask |= 8
+  return CARDINAL_17_SLOT[mask]
+}
+
+export function getTileIndex(grid, w, h, x, y, border = 0, mode = 'blob47') {
+  if (mode === 'dual-grid-15') return getDualGridTileIndex(grid, w, h, x, y, border)
+  if (mode === 'cardinal-17') return getCardinal17TileIndex(grid, w, h, x, y, border)
   if (gridGet(grid, w, h, x, y) === 0) return 0
 
   const t  = gridGet(grid, w, h, x,     y - 1, border)
@@ -48,11 +88,11 @@ export function getTileIndex(grid, w, h, x, y, border = 0) {
 }
 
 // Returns an Int16Array of length w*h with the sheet index for every cell.
-export function computeIndexMap(grid, w, h, border = 0) {
+export function computeIndexMap(grid, w, h, border = 0, mode = 'blob47') {
   const out = new Int16Array(w * h)
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      out[y * w + x] = getTileIndex(grid, w, h, x, y, border)
+      out[y * w + x] = getTileIndex(grid, w, h, x, y, border, mode)
     }
   }
   return out
@@ -65,9 +105,9 @@ export function computeIndexMap(grid, w, h, border = 0) {
 // When `dirty` (array) is passed, the cell indices whose sheet index actually
 // changed are pushed onto it (useful for partial canvas redraws).
 // Returns { map, full }.
-export function patchIndexMap(prevMap, prevGrid, grid, w, h, border = 0, dirty = null) {
+export function patchIndexMap(prevMap, prevGrid, grid, w, h, border = 0, dirty = null, mode = 'blob47') {
   if (!prevMap || !prevGrid || prevGrid.length !== grid.length || prevMap.length !== w * h) {
-    return { map: computeIndexMap(grid, w, h, border), full: true }
+    return { map: computeIndexMap(grid, w, h, border, mode), full: true }
   }
   const out = new Int16Array(prevMap)
   const done = new Set()
@@ -82,7 +122,7 @@ export function patchIndexMap(prevMap, prevGrid, grid, w, h, border = 0, dirty =
         const ci = ny * w + nx
         if (done.has(ci)) continue
         done.add(ci)
-        const after = getTileIndex(grid, w, h, nx, ny, border)
+        const after = getTileIndex(grid, w, h, nx, ny, border, mode)
         if (after !== out[ci]) {
           out[ci] = after
           if (dirty) dirty.push(ci)
@@ -96,9 +136,9 @@ export function patchIndexMap(prevMap, prevGrid, grid, w, h, border = 0, dirty =
 // Same as patchIndexMap, but the caller provides the exact cell indices that
 // changed in the source grid. This avoids scanning the whole map to discover
 // diffs during brush strokes.
-export function patchIndexMapFromCells(prevMap, grid, changedCells, w, h, border = 0, dirty = null) {
+export function patchIndexMapFromCells(prevMap, grid, changedCells, w, h, border = 0, dirty = null, mode = 'blob47') {
   if (!prevMap || prevMap.length !== w * h || !changedCells?.length) {
-    return { map: computeIndexMap(grid, w, h, border), full: true }
+    return { map: computeIndexMap(grid, w, h, border, mode), full: true }
   }
   const out = new Int16Array(prevMap)
   const done = new Set()
@@ -113,7 +153,7 @@ export function patchIndexMapFromCells(prevMap, grid, changedCells, w, h, border
         const ci = ny * w + nx
         if (done.has(ci)) continue
         done.add(ci)
-        const after = getTileIndex(grid, w, h, nx, ny, border)
+        const after = getTileIndex(grid, w, h, nx, ny, border, mode)
         if (after !== out[ci]) {
           out[ci] = after
           if (dirty) dirty.push(ci)

@@ -1,7 +1,7 @@
 import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState } from 'react'
 import { useGesture } from '@use-gesture/react'
 import { Application, Container, Rectangle, Sprite, Texture } from 'pixi.js'
-import { computeIndexMap, patchIndexMap, patchIndexMapFromCells } from '../../core/autotile.js'
+import { autotileModeForDefinition, computeIndexMap, patchIndexMap, patchIndexMapFromCells } from '../../core/autotile.js'
 import { composeNativeSheet } from '../../core/composeSheet.js'
 import { FILL_INDEX, makeFillVariants, pickVariant } from '../../core/tileVariants.js'
 import { ANIM_FRAME_MS } from '../../core/tilesetDefinition.js'
@@ -363,9 +363,12 @@ export function LevelCanvas({
       const textures = textureEntry.textures
       const variants = textureEntry.fillVariantTextures || []
       const useVariants = tileVariation && variants.length > 0
+      const autotileMode = autotileModeForDefinition(layer.tileset?.definition)
+      const usesNegativeEmpty = autotileMode === 'dual-grid-15' || autotileMode === 'cardinal-17'
       const fullRebuild = !state.indexMap
         || state.tileRef !== layerTile
         || state.border !== border
+        || state.autotileMode !== autotileMode
         || state.variation !== useVariants
         || state.collision !== !!layer.collision
 
@@ -373,14 +376,14 @@ export function LevelCanvas({
       let dirtyCells = []
 
       if (fullRebuild) {
-        indexMap = computeIndexMap(layer.grid, width, height, border)
+        indexMap = computeIndexMap(layer.grid, width, height, border, autotileMode)
         dirtyCells = Array.from({ length: expected }, (_, cell) => cell)
       } else if (state.grid !== layer.grid) {
         const dirty = []
         const terrainDirty = Array.isArray(layer._dirtyTerrain) ? layer._dirtyTerrain : null
         indexMap = terrainDirty?.length
-          ? patchIndexMapFromCells(state.indexMap, layer.grid, terrainDirty, width, height, border, dirty).map
-          : patchIndexMap(state.indexMap, state.grid, layer.grid, width, height, border, dirty).map
+          ? patchIndexMapFromCells(state.indexMap, layer.grid, terrainDirty, width, height, border, dirty, autotileMode).map
+          : patchIndexMap(state.indexMap, state.grid, layer.grid, width, height, border, dirty, autotileMode).map
         dirtyCells = dirty
       }
 
@@ -405,7 +408,7 @@ export function LevelCanvas({
         const idx = layer.kind === 'manual'
           ? manualIdx
           : (manualIdx >= 0 ? manualIdx : (indexMap[cell] ?? 0))
-        const isEmpty = layer.kind === 'manual' ? idx < 0 : !idx
+        const isEmpty = layer.kind === 'manual' || usesNegativeEmpty ? idx < 0 : !idx
         state.cellIdx[cell] = isEmpty ? -1 : idx
         if (isEmpty) {
           sprite.visible = false
@@ -430,6 +433,7 @@ export function LevelCanvas({
       state.manualTiles = layer.manualTiles
       state.tileRef = layerTile
       state.border = border
+      state.autotileMode = autotileMode
       state.texEntry = textureEntry
     })
   }, [pixiReady, layers, layerTiles, width, height, tileSize, viewCellPx, seamlessEdges, getTerrainTextures, tileVariation])

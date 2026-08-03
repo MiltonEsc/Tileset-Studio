@@ -78,6 +78,28 @@ test('tilesFromDefinition resizes a textures def to the requested size (cheap ga
   assert.equal(tilesFromDefinition(def, 32)[1].width, 32)
 })
 
+test('manual-sheet definitions expose their cells as paintable tiles and pad to 48 slots', () => {
+  const red = new Uint8ClampedArray(2 * 2 * 4)
+  const blue = new Uint8ClampedArray(2 * 2 * 4)
+  for (let i = 0; i < red.length; i += 4) {
+    red[i] = 255; red[i + 3] = 255
+    blue[i + 2] = 255; blue[i + 3] = 255
+  }
+  const def = {
+    mode: 'manual-sheet',
+    sourceTileSize: 2,
+    columns: 4,
+    tileCount: 2,
+    tiles: [bytesToBase64(red), bytesToBase64(blue)],
+  }
+  const tiles = tilesFromDefinition(def, 2)
+
+  assert.equal(tiles.length, 48)
+  assert.deepEqual(Array.from(tiles[0].data.slice(0, 4)), [255, 0, 0, 255])
+  assert.deepEqual(Array.from(tiles[1].data.slice(0, 4)), [0, 0, 255, 255])
+  assert.deepEqual(Array.from(tiles[47].data.slice(0, 4)), [0, 0, 0, 0])
+})
+
 test('framesFromDefinition: N-1 deterministic frames for procedural defs only', () => {
   const def = { mode: 'procedural', biomeId: null, animationFrames: 3 }
   const frames = framesFromDefinition(def, SIZE)

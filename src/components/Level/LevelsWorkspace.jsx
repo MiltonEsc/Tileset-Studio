@@ -3,7 +3,7 @@ import { Segmented } from '../ui/Segmented.jsx'
 import { Section } from '../ui/Section.jsx'
 import { Btn } from '../ui/Btn.jsx'
 import { LevelCanvas } from './LevelCanvas.jsx'
-import { computeIndexMap } from '../../core/autotile.js'
+import { autotileModeForDefinition, computeIndexMap } from '../../core/autotile.js'
 import { composeNativeSheet } from '../../core/composeSheet.js'
 import { exportLevelTiled, exportLevelGodot, exportLevelUnity } from '../../core/exportLevel.js'
 import { FILL_INDEX, makeFillVariants, pickVariant } from '../../core/tileVariants.js'
@@ -630,17 +630,17 @@ export function LevelsWorkspace({
     return sheet
   }, [tileSize])
 
-  const getCachedIndexMap = useCallback((grid, width, height, seamlessEdges) => {
+  const getCachedIndexMap = useCallback((grid, width, height, seamlessEdges, mode = 'blob47') => {
     if (!grid) return null
     const seamless = seamlessEdges ? 1 : 0
-    const cacheKey = `${width}:${height}:${seamless}`
+    const cacheKey = `${width}:${height}:${seamless}:${mode}`
     let gridCache = indexMapCache.current.get(grid)
     if (!gridCache) {
       gridCache = new Map()
       indexMapCache.current.set(grid, gridCache)
     }
     if (gridCache.has(cacheKey)) return gridCache.get(cacheKey)
-    const map = computeIndexMap(grid, width, height, seamless)
+    const map = computeIndexMap(grid, width, height, seamless, mode)
     gridCache.set(cacheKey, map)
     return map
   }, [])
@@ -679,7 +679,9 @@ export function LevelsWorkspace({
       if (!layer?.visible || !layerTile?.tiles) continue
       const ltSize = layerTile.tileSize || tileSize
       const sheet = getCachedNativeSheet(layerTile)
-      const exportIndexMap = getCachedIndexMap(layer.grid, level.width, level.height, level.seamlessEdges)
+      const autotileMode = autotileModeForDefinition(layer.tileset?.definition)
+      const usesNegativeEmpty = autotileMode === 'dual-grid-15' || autotileMode === 'cardinal-17'
+      const exportIndexMap = getCachedIndexMap(layer.grid, level.width, level.height, level.seamlessEdges, autotileMode)
       if (!sheet) continue
       ctx.globalAlpha = Math.max(0, Math.min(1, layer.opacity ?? 1))
       // Fill-tile variants for this layer (anti-repetition), baked into the PNG.
@@ -696,7 +698,7 @@ export function LevelsWorkspace({
           const idx = layer.kind === 'manual'
             ? manualIdx
             : (manualIdx >= 0 ? manualIdx : (exportIndexMap?.[cell] ?? 0))
-          const isEmpty = layer.kind === 'manual' ? idx < 0 : !idx
+          const isEmpty = layer.kind === 'manual' || usesNegativeEmpty ? idx < 0 : !idx
           if (isEmpty) continue
           if (variantCanvases.length && idx === FILL_INDEX) {
             const pick = pickVariant(x, y, 1 + variantCanvases.length)

@@ -30,7 +30,7 @@ test('buildImageRequestBody uses Gemini image generation defaults', () => {
   const body = aiTile.buildImageRequestBody('gemini-2.5-flash-image', prompt)
 
   assert.equal(body.meta.model, 'gemini-2.5-flash-image')
-  assert.equal(body.meta.quality, 'high')
+  assert.equal(body.meta.quality, 'low')
   assert.equal(body.meta.outputFormat, 'png')
   assert.deepEqual(body.generationConfig.responseModalities, ['IMAGE'])
   assert.equal(body.generationConfig.imageConfig.aspectRatio, '1:1')
@@ -40,11 +40,24 @@ test('buildImageRequestBody uses Gemini image generation defaults', () => {
 })
 
 test('providerForModel maps each model to its API provider', () => {
+  assert.equal(aiTile.providerForModel('gpt-image-2'), 'openai')
   assert.equal(aiTile.providerForModel('gemini-2.5-flash-image'), 'gemini')
   assert.equal(aiTile.providerForModel('gpt-image-1'), 'openai')
   assert.equal(aiTile.providerForModel('fal-ai/flux/schnell'), 'fal')
   assert.equal(aiTile.providerForModel('fal-ai/flux/dev'), 'fal')
   assert.equal(aiTile.providerForModel('unknown-model'), 'gemini')
+})
+
+test('GPT Image 2 defaults to the low-cost square request', () => {
+  const body = aiTile.buildOpenAIRequestBody('gpt-image-2', 'seamless mossy stone')
+
+  assert.deepEqual(body, {
+    model: 'gpt-image-2',
+    prompt: 'seamless mossy stone',
+    n: 1,
+    size: '1024x1024',
+    quality: 'low',
+  })
 })
 
 test('diffusion caption prompts ask for flat 2D pixel-art terrain with tileability anchors', () => {

@@ -11,6 +11,7 @@ import { GalleryDock }     from './components/BiomeGallery/GalleryDock.jsx'
 // bulk of the bundle) and Assets is secondary — load both on demand.
 const LevelsWorkspace = lazy(() => import('./components/Level/LevelsWorkspace.jsx').then(m => ({ default: m.LevelsWorkspace })))
 const AssetsView = lazy(() => import('./components/Assets/AssetsView.jsx').then(m => ({ default: m.AssetsView })))
+const SpriteCookWorkspace = lazy(() => import('./components/SpriteCook/SpriteCookWorkspace.jsx').then(m => ({ default: m.SpriteCookWorkspace })))
 import { useDrawingCanvas } from './hooks/useDrawingCanvas.js'
 import { useTilesheet }     from './hooks/useTilesheet.js'
 import { useLevelMap }      from './hooks/useLevelMap.js'
@@ -27,6 +28,7 @@ import {
   framesFromDefinition, MAX_ANIM_FRAMES,
 } from './core/tilesetDefinition.js'
 import { generateAllBiomeTiles } from './core/proceduralGen.js'
+import { autotileModeForDefinition } from './core/autotile.js'
 
 function cloneColors(colors) {
   return {
@@ -219,7 +221,7 @@ export default function App({ auth = null }) {
 
   // Restore the last navigation context so a reload doesn't always dump the user
   // back on Editor ▸ Tileset (persisted in the effect below).
-  const [activeView, setActiveView] = useState(() => readUI('activeView', 'editor')) // 'editor' | 'level'
+  const [activeView, setActiveView] = useState(() => readUI('activeView', 'editor')) // 'editor' | 'level' | 'spritecook'
   const [editorKind, setEditorKind] = useState(() => readUI('editorKind', 'tileset')) // 'tileset' | 'prop'
   const [tileSize, setTileSize]     = useState(32)
   const [regenerating, setRegenerating] = useState(false) // overlay while high-res tiles rebuild
@@ -849,8 +851,31 @@ export default function App({ auth = null }) {
     tilesets.save({ name, tileSize, definition: currentTilesetDefinition() })
   }, [tilesets, tileSize, currentTilesetDefinition])
 
+  const handleUseSpriteCookInLevel = useCallback(({ name, tileSize: sourceTileSize, definition, savedId = null }) => {
+    if (sourceTileSize !== tileSize) handleTileSizeChange(sourceTileSize)
+    const autotileMode = autotileModeForDefinition(definition)
+    const layerKind = autotileMode === 'dual-grid-15' || autotileMode === 'cardinal-17' ? 'autotile' : 'manual'
+    level.addLayer({ name, tileSize: sourceTileSize, definition, ...(savedId ? { savedId } : {}) }, layerKind)
+    setManualSelectedTile(0)
+    setLevelMode(layerKind)
+    setLevelTool('terrain')
+    setActiveView('level')
+    showLevelNotice(layerKind === 'autotile'
+      ? `“${name}” is ready on a new SpriteCook autotile layer. Paint terrain normally.`
+      : `“${name}” is ready on a new manual layer. Choose a tile in Terrain options and paint.`)
+  }, [level, tileSize])
+
   const handleLoadTileset = useCallback((row) => {
     const size = row.tile_size
+    if (row.definition?.mode === 'manual-sheet') {
+      handleUseSpriteCookInLevel({
+        name: row.name,
+        tileSize: size,
+        definition: row.definition,
+        savedId: row.id,
+      })
+      return
+    }
     setTileSize(size)
     drawing.resetCanvas(size)
     // Defer the 48-tile generation to the saved-tileset effect below when we're
@@ -881,7 +906,7 @@ export default function App({ auth = null }) {
     }
     // The saved-tileset effect (draw branch) loads the recolored base pixels, so
     // no drawing.loadPixels here — doing both double-loads + double-pushes history.
-  }, [drawing, applyTilesetDefinition, editorKind])
+  }, [drawing, applyTilesetDefinition, editorKind, handleUseSpriteCookInLevel])
 
   useEffect(() => {
     if (activeView !== 'editor' || editorKind !== 'tileset') return
@@ -1238,8 +1263,10 @@ export default function App({ auth = null }) {
   const showTileset = activeView === 'editor' && editorKind === 'tileset'
   const showAssets  = activeView === 'editor' && editorKind === 'prop'
   const showLevel   = activeView === 'level'
+  const showSpriteCook = activeView === 'spritecook'
   const everAssets = useRef(false); everAssets.current = everAssets.current || showAssets
   const everLevel  = useRef(false); everLevel.current  = everLevel.current  || showLevel
+  const everSpriteCook = useRef(false); everSpriteCook.current = everSpriteCook.current || showSpriteCook
 
   // Remember the navigation context across reloads (see readUI above).
   useEffect(() => {
@@ -1260,6 +1287,7 @@ export default function App({ auth = null }) {
     const prefetch = () => {
       import('./components/Assets/AssetsView.jsx').catch(() => {})
       import('./components/Level/LevelsWorkspace.jsx').catch(() => {})
+      import('./components/SpriteCook/SpriteCookWorkspace.jsx').catch(() => {})
     }
     if (window.requestIdleCallback) {
       const id = window.requestIdleCallback(prefetch)
@@ -1346,10 +1374,12 @@ export default function App({ auth = null }) {
 
         <Segmented
           size="sm"
-          value={activeView === 'level' ? 'level' : (editorKind === 'tileset' ? 'tileset' : 'prop')}
+          value={activeView === 'level' ? 'level' : activeView === 'spritecook' ? 'spritecook' : (editorKind === 'tileset' ? 'tileset' : 'prop')}
           onChange={(tab) => {
             if (tab === 'level') {
               setActiveView('level')
+            } else if (tab === 'spritecook') {
+              setActiveView('spritecook')
             } else {
               setActiveView('editor')
               setEditorKind(tab)
@@ -1357,6 +1387,7 @@ export default function App({ auth = null }) {
           }}
           options={[
             { value: 'tileset', label: t('tileset'), icon: 'grid' },
+            { value: 'spritecook', label: 'Base Gen', icon: 'spark' },
             { value: 'prop', label: t('assets'), icon: 'image' },
             { value: 'level', label: t('levels'), icon: 'layers' }
           ]}
@@ -1426,6 +1457,14 @@ export default function App({ auth = null }) {
         </div>
       )}
 
+      {everSpriteCook.current && (
+        <div className={`view-pane ${showSpriteCook ? '' : 'view-hidden'}`}>
+          <Suspense fallback={<div className="level-empty">Loading…</div>}>
+            <SpriteCookWorkspace onSave={tilesets.save} onUseInLevel={handleUseSpriteCookInLevel} />
+          </Suspense>
+        </div>
+      )}
+
       {everLevel.current && (
         <div className={`view-pane ${showLevel ? '' : 'view-hidden'}`}>
           <Suspense fallback={<div className="level-empty">Loading…</div>}>
@@ -1485,7 +1524,7 @@ export default function App({ auth = null }) {
         </div>
       )}
 
-      {galleryDock}
+      {!showSpriteCook && galleryDock}
 
       {regenerating && (
         <div className="regen-overlay">

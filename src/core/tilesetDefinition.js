@@ -58,6 +58,18 @@ export function decodeDefinitionOverrides(def) {
 }
 
 function baseTilesFromDefinition(def, tileSize) {
+  if (def?.mode === 'manual-sheet') {
+    const tiles = Array.from({ length: 48 }, () => new ImageData(new Uint8ClampedArray(tileSize * tileSize * 4), tileSize, tileSize))
+    for (let i = 0; i < Math.min(48, def.tiles?.length || 0); i++) {
+      const bytes = new Uint8ClampedArray(base64ToBytes(def.tiles[i]))
+      const native = def.sourceTileSize || Math.round(Math.sqrt(bytes.length / 4))
+      const resized = native === tileSize
+        ? bytes
+        : downscaleRgba(bytes, native, native, tileSize, tileSize)
+      tiles[i] = new ImageData(new Uint8ClampedArray(resized), tileSize, tileSize)
+    }
+    return tiles
+  }
   if (def?.mode === 'draw') {
     const bytes = base64ToBytes(def.basePixels)
     const side = Math.round(Math.sqrt(bytes.length / 4))
@@ -110,7 +122,7 @@ export function tilesFromDefinition(def, tileSize) {
 // Hand-edited override tiles are applied to every frame, so they stay static.
 function computeFramesFromDefinition(def, tileSize) {
   const count = Math.min(MAX_ANIM_FRAMES, def?.animationFrames | 0)
-  if (!def || def.mode === 'draw' || def.mode === 'textures' || count < 2) return null
+  if (!def || def.mode === 'draw' || def.mode === 'textures' || def.mode === 'manual-sheet' || count < 2) return null
   const base = BIOME_MAP[def.biomeId] || BIOMES[0]
   const biome = { ...base, colors: { ...base.colors, ...(def.colors || {}) } }
   const overrides = decodeDefinitionOverrides(def)

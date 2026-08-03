@@ -1030,3 +1030,48 @@ textarea.text-input { resize: vertical; font-family: var(--ui); }
   padding: 5px 9px; border-radius: var(--r-btn); border: var(--bw) solid var(--line);
   background: var(--surface-2); color: var(--ink-dim); transition: all .15s; white-space: nowrap; }
 .account-signout:hover { border-color: var(--accent-line); color: var(--ink); }
+
+/* Embedded SpriteCook base generator + host bridge. The iframe keeps the
+   upstream tool's own visual system intact; only this surrounding bar is ours. */
+.spritecook-workspace {
+  height: calc(100vh - 58px); min-height: 620px; display: grid;
+  grid-template-rows: auto minmax(0, 1fr); background: #151712;
+}
+.spritecook-hostbar {
+  position: relative; z-index: 1; display: grid;
+  grid-template-columns: minmax(220px, .8fr) minmax(170px, .45fr) minmax(320px, 1.35fr) auto;
+  align-items: end; gap: 9px 12px; padding: 10px 14px;
+  color: var(--ink); background: var(--surface-1); border-bottom: 1px solid var(--line);
+  box-shadow: 0 5px 18px rgba(0,0,0,.24);
+}
+.spritecook-host-copy { display: flex; flex-direction: column; gap: 2px; align-self: center; }
+.spritecook-host-copy b { font: 700 13px var(--ui); }
+.spritecook-host-copy span, .spritecook-hostbar label > span, .spritecook-status {
+  color: var(--ink-dim); font: 500 10.5px var(--ui);
+}
+.spritecook-hostbar label { display: flex; flex-direction: column; gap: 4px; }
+.spritecook-hostbar input {
+  min-width: 0; height: 32px; padding: 0 9px; border-radius: var(--r-btn);
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: 12px var(--ui);
+}
+.spritecook-actions { display: flex; gap: 6px; flex-wrap: wrap; align-self: center; }
+.spritecook-actions button {
+  padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--r-btn);
+  background: var(--surface-2); color: var(--ink-dim); cursor: pointer; font: 700 11px var(--ui);
+}
+.spritecook-actions button:hover:not(:disabled) { border-color: var(--accent-line); color: var(--ink); }
+.spritecook-actions button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.spritecook-actions button:disabled { opacity: .55; cursor: wait; }
+.spritecook-status { grid-column: 1 / -2; min-height: 16px; }
+.spritecook-status .error { color: var(--danger); }
+.spritecook-result-preview {
+  position: absolute; right: 14px; bottom: 8px; width: 48px; height: 48px;
+  object-fit: contain; image-rendering: pixelated; border: 1px solid var(--line); border-radius: 4px;
+  background: repeating-conic-gradient(#30332d 0 25%, #20221e 0 50%) 50% / 8px 8px;
+}
+.spritecook-frame { display: block; width: 100%; height: 100%; border: 0; background: #151712; }
+@media (max-width: 1180px) {
+  .spritecook-hostbar { grid-template-columns: 1fr 1fr; }
+  .spritecook-prompt { grid-column: 1 / -1; }
+  .spritecook-status { grid-column: 1 / -1; padding-right: 54px; }
+}

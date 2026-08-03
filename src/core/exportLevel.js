@@ -6,7 +6,7 @@
 // tile index (0..47) maps to atlas coords (idx % 8, idx / 8). Empty cells are -1
 // in the generic JSON and gid 0 in Tiled. Prop *placement* is preserved; prop
 // images live in a separate atlas and are not exported here.
-import { computeIndexMap } from './autotile.js'
+import { autotileModeForDefinition, computeIndexMap } from './autotile.js'
 import { composeNativeSheet, SHEET_COLS, SHEET_ROWS } from './composeSheet.js'
 import { FILL_INDEX, makeFillVariants, pickVariant } from './tileVariants.js'
 import { ANIM_FRAME_MS } from './tilesetDefinition.js'
@@ -69,14 +69,16 @@ function buildLevelModel({ level, layerTiles, tileSize, assetsById = {}, tileVar
     if (!layerTile?.tiles) return
     const tilesetId = getTilesetId(layerTile)
     const variantCount = tilesets[tilesetId].variantCount
-    const indexMap = layer.kind === 'manual' ? null : computeIndexMap(layer.grid, width, height, border)
+    const autotileMode = autotileModeForDefinition(layer.tileset?.definition)
+    const usesNegativeEmpty = autotileMode === 'dual-grid-15' || autotileMode === 'cardinal-17'
+    const indexMap = layer.kind === 'manual' ? null : computeIndexMap(layer.grid, width, height, border, autotileMode)
     const data = new Array(width * height)
     for (let cell = 0; cell < width * height; cell++) {
       const manualIdx = layer.manualTiles[cell]
       let idx = layer.kind === 'manual'
         ? manualIdx
         : (manualIdx >= 0 ? manualIdx : (indexMap?.[cell] ?? 0))
-      const isEmpty = layer.kind === 'manual' ? idx < 0 : !idx
+      const isEmpty = layer.kind === 'manual' || usesNegativeEmpty ? idx < 0 : !idx
       // Bake the per-cell fill variant into the tile index (variant tiles live at 48..).
       if (!isEmpty && variantCount > 0 && idx === FILL_INDEX) {
         const pick = pickVariant(cell % width, (cell / width) | 0, 1 + variantCount)

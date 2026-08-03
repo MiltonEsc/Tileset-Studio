@@ -5,8 +5,8 @@ import { AI_MODELS, generateImage } from './aiTile.js'
 
 export { AI_MODELS }
 
-const DEFAULT_ASSET_MODEL = 'gemini-2.5-flash-image'
-const DEFAULT_QUALITY = 'medium'
+const DEFAULT_ASSET_MODEL = 'gpt-image-2'
+const DEFAULT_QUALITY = 'low'
 
 const STYLE_BASE = `
 Generate a single isolated pixel-art game prop.
