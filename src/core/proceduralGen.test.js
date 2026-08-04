@@ -7,7 +7,7 @@ if (!globalThis.ImageData) {
   }
 }
 
-const { valueNoise, generateAllBiomeTiles } = await import('./proceduralGen.js')
+const { valueNoise, generateAllBiomeTiles, generateBiomeTiles, generateTilesFromTextures } = await import('./proceduralGen.js')
 
 const biome = {
   colors: { primary: '#5aa83a', secondary: '#4a9030', border: '#2a5612', highlight: '#9be05a', shadow: '#386a20' },
@@ -41,6 +41,49 @@ test('generateAllBiomeTiles is deterministic and yields 48 tiles', () => {
   for (let i = 0; i < 48; i++) {
     assert.deepEqual(Array.from(a[i].data), Array.from(b[i].data))
   }
+})
+
+test('SpriteCook procedural mode preserves the biome texture behind transparent platform edges', () => {
+  const spriteCookBiome = {
+    ...biome,
+    proceduralParams: { ...biome.proceduralParams, engine: 'spritecook' },
+  }
+  const dispatched = generateBiomeTiles(spriteCookBiome, 16)
+
+  assert.equal(dispatched.length, 48)
+  assert.equal(dispatched[0].data[3], 0, 'empty slot must be transparent')
+  assert.equal(dispatched[1].data[3], 0, 'isolated platform corner must reveal the layer below')
+  assert.equal(dispatched[1].data[((8 * 16 + 8) * 4) + 3], 255, 'platform centre remains opaque')
+  for (let i = 0; i < dispatched[1].data.length; i += 4) {
+    if (!dispatched[1].data[i + 3]) continue
+    assert.deepEqual(
+      Array.from(dispatched[1].data.slice(i, i + 3)),
+      Array.from(dispatched[47].data.slice(i, i + 3)),
+      'visible platform pixels must come directly from the seamless fill texture',
+    )
+  }
+  for (let i = 3; i < dispatched[47].data.length; i += 4) {
+    assert.equal(dispatched[47].data[i], 255, 'fully surrounded fill tile remains opaque')
+  }
+})
+
+test('SpriteCook masking also applies to imported or AI procedural textures', () => {
+  const size = 16
+  const pixels = new Uint8ClampedArray(size * size * 4)
+  for (let i = 0; i < pixels.length; i += 4) {
+    pixels[i] = 80; pixels[i + 1] = 120; pixels[i + 2] = 60; pixels[i + 3] = 255
+  }
+  const tiles = generateTilesFromTextures(
+    new ImageData(pixels, size, size),
+    null,
+    size,
+    biome.colors,
+    false,
+    { engine: 'spritecook' },
+  )
+
+  assert.equal(tiles[1].data[3], 0)
+  assert.equal(tiles[1].data[((8 * size + 8) * 4) + 3], 255)
 })
 
 test('the fill tile carries mottling (not a single flat colour)', () => {

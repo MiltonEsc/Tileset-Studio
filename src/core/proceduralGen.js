@@ -1,4 +1,5 @@
 import { BITS, validMasks, BITMASK_TO_INDEX } from '../constants/bitmaskTable.js'
+import { generateSpriteCookTiles } from './spritecookGen.js'
 import {
   hexToRGBA, fillRegion, applyOrderedDither,
   setPixelRGBA, getPixelIdx
@@ -812,7 +813,9 @@ export function generateTilesFromTextures(centerData, edgeData, tileSize, biomeC
 
     tiles[idx] = new ImageData(data, s, s)
   }
-  return tiles
+  return proceduralParams.engine === 'spritecook'
+    ? applySpriteCookPlatformMasks(tiles, { colors: biomeColors, proceduralParams }, s)
+    : tiles
 }
 
 // Generates all 48 tiles procedurally for a given biome
@@ -864,4 +867,63 @@ export function generateAllBiomeTiles(biome, tileSize, frameSeed = 0) {
   }
   biomeTilesCache.set(sig, tiles)
   return tiles
+}
+
+// Shared procedural-engine dispatcher. Every consumer must go through this
+// function so the live editor, saved definitions, animation, and level layers
+// all render the same tileset for the same procedural parameters.
+export function generateBiomeTiles(biome, tileSize, frameSeed = 0) {
+  if (biome?.proceduralParams?.engine !== 'spritecook') {
+    return generateAllBiomeTiles(biome, tileSize, frameSeed)
+  }
+
+  // Keep the selected biome/AI material, but cut its 47 variants with the same
+  // transparent platform geometry as Base Gen. This lets another terrain layer
+  // show through around exposed edges instead of drawing an opaque rectangular
+  // bevel across the whole boundary cell.
+  const sourceBiome = {
+    ...biome,
+    proceduralParams: { ...(biome.proceduralParams || {}), engine: 'default' },
+  }
+  return applySpriteCookPlatformMasks(
+    generateAllBiomeTiles(sourceBiome, tileSize, frameSeed),
+    biome,
+    tileSize,
+  )
+}
+
+export function applySpriteCookPlatformMasks(tiles, biome, tileSize) {
+  const colors = {
+    primary: '#808080', secondary: '#707070', border: '#404040',
+    highlight: '#a0a0a0', shadow: '#303030',
+    ...(biome?.colors || {}),
+  }
+  const masks = generateSpriteCookTiles({
+    ...biome,
+    colors,
+    proceduralParams: biome?.proceduralParams || {},
+  }, tileSize)
+  const out = new Array(48)
+  // Tile 47 is the fully surrounded, seamless material. Use it as the colour
+  // source for every shape; the other legacy variants already contain an opaque
+  // painted bevel, which would survive the alpha cut and reappear in the level.
+  const seamlessSource = tiles?.[47]?.data
+
+  for (let idx = 0; idx < 48; idx++) {
+    const source = seamlessSource || tiles?.[idx]?.data
+    const mask = masks[idx]?.data
+    const data = new Uint8ClampedArray(tileSize * tileSize * 4)
+    if (idx > 0 && source && mask) {
+      for (let i = 0; i < data.length; i += 4) {
+        const alpha = Math.min(source[i + 3], mask[i + 3])
+        if (!alpha) continue
+        data[i] = source[i]
+        data[i + 1] = source[i + 1]
+        data[i + 2] = source[i + 2]
+        data[i + 3] = alpha
+      }
+    }
+    out[idx] = new ImageData(data, tileSize, tileSize)
+  }
+  return out
 }

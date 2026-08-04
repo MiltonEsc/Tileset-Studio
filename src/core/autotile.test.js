@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { computeIndexMap, patchIndexMapFromCells } from './autotile.js'
+import { computeIndexMap, isAutotileDefinition, patchIndexMapFromCells } from './autotile.js'
 
 test('SpriteCook dual-grid autotile maps one painted point to four connected corner pieces', () => {
   const w = 3, h = 3
@@ -40,4 +40,14 @@ test('SpriteCook 17-piece mode autotiles cardinal connections in its original 5x
   assert.equal(map[1 * w + 2], 22) // east + west horizontal stroke
   assert.equal(map[1 * w + 3], 23) // west connection
   assert.equal(map[0], -1)
+})
+
+test('SpriteCook platform Blob-47 definitions open as autotile layers', () => {
+  assert.equal(isAutotileDefinition({
+    mode: 'manual-sheet',
+    source: 'spritecook-tileset-gen',
+    layout: 'platform-47',
+    autotile: 'blob47',
+  }), true)
+  assert.equal(isAutotileDefinition({ mode: 'manual-sheet' }), false)
 })
