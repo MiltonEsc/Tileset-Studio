@@ -74,6 +74,11 @@ function fbm(x, y, seed) {
   return total / norm;
 }
 
+export function spriteCookDefaultPadding(tileSize) {
+  // Matches Base Gen's default `2 * (tileSize / 16)` edge padding.
+  return Math.max(1, Math.round(tileSize / 8));
+}
+
 // Evaluate SDF for a specific pixel and a 47-tile bitmask
 function evaluateTileSdf(px, py, mask, tileSize, radius, pad, ov, ext) {
   const half = tileSize / 2;
@@ -156,18 +161,9 @@ export function generateSpriteCookTiles(biome, tileSize, frameSeed = 0) {
   const cSec  = hexToRGBA(biome.colors.secondary);
   const cBord = hexToRGBA(biome.colors.border);
   
-  // Checkerboard for empty
+  // Index 0 is the genuinely transparent empty slot. The sheet canvases already
+  // provide their own checkerboard behind transparent pixels.
   const emptyData = new Uint8ClampedArray(tileSize * tileSize * 4);
-  for (let y = 0; y < tileSize; y++) {
-    for (let x = 0; x < tileSize; x++) {
-      const i = (y * tileSize + x) * 4;
-      const light = ((x + y) % 2 === 0);
-      emptyData[i]     = light ? 70 : 45;
-      emptyData[i + 1] = light ? 70 : 45;
-      emptyData[i + 2] = light ? 70 : 45;
-      emptyData[i + 3] = 255;
-    }
-  }
   tiles[0] = new ImageData(emptyData, tileSize, tileSize);
   
   const p = biome.proceduralParams || {};
@@ -175,7 +171,7 @@ export function generateSpriteCookTiles(biome, tileSize, frameSeed = 0) {
   
   // Match SpriteCook defaults
   const cornerRadius = p.cornerRadius ?? Math.max(0, Math.floor(tileSize * 0.2));
-  const pad = p.padding ?? 1;
+  const pad = p.padding ?? spriteCookDefaultPadding(tileSize);
   const edgeStyle = p.edgeStyle ?? 'rough'; // 'rough' or 'clean'
   const edgeNoise = p.edgeNoise ?? 2.0;
   const noiseSize = p.noiseSize ?? 0.15;

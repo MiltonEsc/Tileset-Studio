@@ -38,6 +38,16 @@ export function autotileModeForDefinition(definition) {
   return 'blob47'
 }
 
+// Manual sheets are manual by default. They become autotile layers only when
+// they explicitly declare Blob-47, or when they are one of the legacy
+// SpriteCook layouts whose mode can be inferred from their layout metadata.
+export function isAutotileDefinition(definition) {
+  const mode = autotileModeForDefinition(definition)
+  return mode === 'dual-grid-15'
+    || mode === 'cardinal-17'
+    || (mode === 'blob47' && definition?.autotile === 'blob47')
+}
+
 export function getDualGridTileIndex(grid, w, h, x, y, border = 0) {
   let mask = 0
   if (gridGet(grid, w, h, x,     y,     border)) mask |= 1

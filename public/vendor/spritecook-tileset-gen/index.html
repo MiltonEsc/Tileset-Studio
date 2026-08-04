@@ -368,6 +368,7 @@
               <select id="tilesetType">
                 <option value="topdown-15">15-piece (4x4)</option>
                 <option value="topdown-17">17-piece (5x5)</option>
+                <option value="platform-47">Platform 47+1 (8x6)</option>
               </select>
             </div>
 
@@ -564,6 +565,26 @@
         [0, 8, 6, 1],
       ];
 
+      // Tileset Studio's platform format: empty slot at index 0 followed by the
+      // 47 valid Blob-47 neighbour masks, sorted by their raw bitmask value.
+      const blobBits = { tl: 0x01, t: 0x02, tr: 0x04, l: 0x08, r: 0x10, bl: 0x20, b: 0x40, br: 0x80 };
+      const blob47Masks = [];
+      for (let raw = 0; raw <= 255; raw += 1) {
+        const tl = (raw & blobBits.tl) !== 0;
+        const t = (raw & blobBits.t) !== 0;
+        const tr = (raw & blobBits.tr) !== 0;
+        const l = (raw & blobBits.l) !== 0;
+        const r = (raw & blobBits.r) !== 0;
+        const bl = (raw & blobBits.bl) !== 0;
+        const b = (raw & blobBits.b) !== 0;
+        const br = (raw & blobBits.br) !== 0;
+        if (tl && !(t && l)) continue;
+        if (tr && !(t && r)) continue;
+        if (bl && !(b && l)) continue;
+        if (br && !(b && r)) continue;
+        blob47Masks.push(raw);
+      }
+
       const emptyPiece = { kind: "empty" };
       const rectPiece = (connections) => ({ kind: "rect", ...connections });
       const topdown17Layout = [
@@ -647,6 +668,10 @@
         if (k <= 0) return Math.min(a, b);
         const h = clamp(0.5 + (0.5 * (b - a)) / k, 0, 1);
         return lerp(b, a, h) - k * h * (1 - h);
+      }
+
+      function smax(a, b, k) {
+        return -smin(-a, -b, k);
       }
 
       function hexToRgb(hex) {
@@ -807,6 +832,51 @@
         return rectPieceSdf(piece, x, y, tileSize, radius, roughness, padding);
       }
 
+      function blob47Sdf(mask, x, y, tileSize, radius, roughness, padding) {
+        const half = tileSize * 0.5;
+        const overlap = Math.max(2, Math.floor(tileSize * OVERLAP));
+        const inset = clamp(Math.round(padding), 1, Math.max(1, Math.floor(tileSize * 0.35)));
+        const ext = radius + roughness + 2;
+        const has = (bit) => (mask & bit) !== 0;
+        let dist = 9999;
+
+        const addQuadrant = (left, top, right, bottom, notch) => {
+          let d = roundedBoxSdf(x, y, left, top, right, bottom, radius);
+          if (notch) d = smax(d, -roundedBoxSdf(x, y, ...notch, radius), radius);
+          dist = Math.min(dist, d);
+        };
+
+        addQuadrant(
+          has(blobBits.l) ? -ext : inset,
+          has(blobBits.t) ? -ext : inset,
+          half + overlap,
+          half + overlap,
+          has(blobBits.l) && has(blobBits.t) && !has(blobBits.tl) ? [-ext, -ext, inset, inset] : null,
+        );
+        addQuadrant(
+          half - overlap,
+          has(blobBits.t) ? -ext : inset,
+          has(blobBits.r) ? tileSize + ext : tileSize - inset,
+          half + overlap,
+          has(blobBits.r) && has(blobBits.t) && !has(blobBits.tr) ? [tileSize - inset, -ext, tileSize + ext, inset] : null,
+        );
+        addQuadrant(
+          has(blobBits.l) ? -ext : inset,
+          half - overlap,
+          half + overlap,
+          has(blobBits.b) ? tileSize + ext : tileSize - inset,
+          has(blobBits.l) && has(blobBits.b) && !has(blobBits.bl) ? [-ext, tileSize - inset, inset, tileSize + ext] : null,
+        );
+        addQuadrant(
+          half - overlap,
+          half - overlap,
+          has(blobBits.r) ? tileSize + ext : tileSize - inset,
+          has(blobBits.b) ? tileSize + ext : tileSize - inset,
+          has(blobBits.r) && has(blobBits.b) && !has(blobBits.br) ? [tileSize - inset, tileSize - inset, tileSize + ext, tileSize + ext] : null,
+        );
+        return dist;
+      }
+
       function getSettings() {
         const tileSize = state.tileSize;
         return {
@@ -850,13 +920,16 @@
         const tile = settings.tileSize;
         const g = settings.showGrid ? 1 : 0;
         const topdown17 = settings.tilesetType === "topdown-17";
-        const cells = topdown17 ? 5 : 4;
-        const size = tile * cells + g * (cells + 1);
+        const platform47 = settings.tilesetType === "platform-47";
+        const columns = platform47 ? 8 : topdown17 ? 5 : 4;
+        const rows = platform47 ? 6 : topdown17 ? 5 : 4;
+        const width = tile * columns + g * (columns + 1);
+        const height = tile * rows + g * (rows + 1);
         const logical = document.createElement("canvas");
-        logical.width = size;
-        logical.height = size;
+        logical.width = width;
+        logical.height = height;
         const logicalCtx = logical.getContext("2d");
-        const image = logicalCtx.createImageData(size, size);
+        const image = logicalCtx.createImageData(width, height);
         const data = image.data;
         const roughness = settings.edgeStyle === "clean" ? 0 : settings.edgeRoughness;
         const noiseSize = Math.max(1, settings.edgeFrequency);
@@ -872,11 +945,11 @@
           ramp.push(mixColor(settings.baseColor, settings.edgeColor, i / (shades - 1)));
         }
 
-        for (let py = 0; py < size; py += 1) {
+        for (let py = 0; py < height; py += 1) {
           const ay = mapAxis(py);
-          for (let px = 0; px < size; px += 1) {
+          for (let px = 0; px < width; px += 1) {
             const ax = mapAxis(px);
-            const i = (py * size + px) * 4;
+            const i = (py * width + px) * 4;
 
             if (ax.cell < 0 || ay.cell < 0) {
               data[i] = 0;
@@ -889,8 +962,10 @@
             const col = ax.cell;
             const row = ay.cell;
             const piece = topdown17 ? topdown17Layout[row][col] : null;
-            const mask = topdown17 ? 0 : layout[row][col];
-            if ((topdown17 && (!piece || piece.kind === "empty")) || (!topdown17 && mask === 0)) {
+            const platformIndex = platform47 ? row * columns + col : -1;
+            const blobMask = platform47 && platformIndex > 0 ? blob47Masks[platformIndex - 1] : null;
+            const mask = topdown17 || platform47 ? 0 : layout[row][col];
+            if ((platform47 && platformIndex === 0) || (topdown17 && (!piece || piece.kind === "empty")) || (!topdown17 && !platform47 && mask === 0)) {
               data[i] = bg.r;
               data[i + 1] = bg.g;
               data[i + 2] = bg.b;
@@ -906,8 +981,10 @@
             const cy = row * tile + ay.local;
             const sdf = topdown17
               ? topdown17Sdf(piece, lx, ly, tile, settings.cornerRadius, roughness, settings.edgePadding)
-              : maskSdf(mask, lx, ly, tile, settings.cornerRadius, roughness);
-            const pieceSeed = topdown17 ? row * cells + col + 1 : mask;
+              : platform47
+                ? blob47Sdf(blobMask, lx, ly, tile, settings.cornerRadius, roughness, settings.edgePadding)
+                : maskSdf(mask, lx, ly, tile, settings.cornerRadius, roughness);
+            const pieceSeed = topdown17 || platform47 ? row * columns + col + 1 : mask;
             const edgeNoise = (fbm(cx / noiseSize, cy / noiseSize, settings.seed + pieceSeed * 113) - 0.5) * roughness;
             const adjusted = sdf + edgeNoise;
 
@@ -920,7 +997,9 @@
                   const sampleCy = cy - depth;
                   const sampleSdf = topdown17
                     ? topdown17Sdf(piece, lx, sampleY, tile, settings.cornerRadius, roughness, settings.edgePadding)
-                    : maskSdf(mask, lx, sampleY, tile, settings.cornerRadius, roughness);
+                    : platform47
+                      ? blob47Sdf(blobMask, lx, sampleY, tile, settings.cornerRadius, roughness, settings.edgePadding)
+                      : maskSdf(mask, lx, sampleY, tile, settings.cornerRadius, roughness);
                   const sampleNoise = (fbm(cx / noiseSize, sampleCy / noiseSize, settings.seed + pieceSeed * 113) - 0.5) * roughness;
                   if (sampleSdf + sampleNoise <= 0) {
                     elevationDepth = depth;
@@ -952,7 +1031,7 @@
             // darker end, texture noise jitters by up to a step or so, and a fleck bumps
             // one or two steps darker. Rounding to an integer index keeps everything on
             // the palette, so transitions read as discrete pixel-art bands.
-            const edgeDepth = topdown17
+            const edgeDepth = topdown17 || platform47
               ? -(sdf + edgeNoise)
               : maskVoidSdf(mask, lx, ly, tile, settings.cornerRadius) - edgeNoise;
             const edgeAmount = settings.edgeFade > 0 ? clamp(1 - edgeDepth / settings.edgeFade, 0, 1) : 0;
@@ -1019,18 +1098,25 @@
         ctx.clearRect(0, 0, preview.width, preview.height);
         ctx.drawImage(logical, 0, 0);
         const upscale = settings.providerSize ? ` / exports 1024` : "";
-        const label = settings.tilesetType === "topdown-17" ? "17-piece top-down" : "15-piece top-down";
+        const label = settings.tilesetType === "platform-47"
+          ? "47+1-piece platform"
+          : settings.tilesetType === "topdown-17" ? "17-piece top-down" : "15-piece top-down";
         readout.textContent = `${settings.tileSize}px tiles / ${label} / ${logical.width}x${logical.height}px native${upscale} / seed ${settings.seed}`;
       }
 
       function updateModeUi(settings = getSettings()) {
         const is17 = settings.tilesetType === "topdown-17";
-        edgePaddingRow.hidden = !is17;
+        const isPlatform47 = settings.tilesetType === "platform-47";
+        edgePaddingRow.hidden = !(is17 || isPlatform47);
         elevationDepthRow.hidden = !settings.elevationEdge;
-        sheetMeta.innerHTML = is17 ? "17 pieces<br />5 x 5 guide sheet" : "15 pieces<br />4 x 4 mask sheet";
-        layoutReadout.textContent = is17
-          ? "layout single + vertical + horizontal + 3x3 island + inner corners"
-          : "slot 4,10,13,12 / 9,14,15,7 / 2,3,11,5 / 0,8,6,1";
+        sheetMeta.innerHTML = isPlatform47
+          ? "47 + 1 pieces<br />8 x 6 Blob sheet"
+          : is17 ? "17 pieces<br />5 x 5 guide sheet" : "15 pieces<br />4 x 4 mask sheet";
+        layoutReadout.textContent = isPlatform47
+          ? "index 0 empty + Blob-47 masks in Tileset Studio order"
+          : is17
+            ? "layout single + vertical + horizontal + 3x3 island + inner corners"
+            : "slot 4,10,13,12 / 9,14,15,7 / 2,3,11,5 / 0,8,6,1";
       }
 
       function syncRangeOutputs() {
@@ -1063,7 +1149,7 @@
 
       document.querySelectorAll("input, select").forEach((control) => {
         control.addEventListener("input", () => {
-          if (control.id === "tilesetType" && control.value === "topdown-17") {
+          if (control.id === "tilesetType" && (control.value === "topdown-17" || control.value === "platform-47")) {
             document.querySelector("#showGrid").checked = true;
           }
           syncRangeOutputs();
@@ -1090,7 +1176,7 @@
         const logical = renderLogical(settings);
         const output = settings.providerSize ? scaleCanvas(logical, 1024) : logical;
         const dim = settings.providerSize ? "1024" : `${logical.width}px`;
-        const mode = settings.tilesetType === "topdown-17" ? "topdown-17" : "topdown-15";
+        const mode = settings.tilesetType;
         const link = document.createElement("a");
         link.download = `tileset-base-${mode}-${settings.tileSize}px-${dim}-seed-${settings.seed}.png`;
         link.href = output.toDataURL("image/png");

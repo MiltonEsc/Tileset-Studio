@@ -786,6 +786,17 @@ export function LevelsWorkspace({
         <b>{projectName}</b>
         <span>{level.width}×{level.height} · {tileSize}px</span>
       </div>
+      <div className="level-toolbar-status" aria-label="Level status">
+        <span className="level-status-pill">{levelToolOptions.find(tool => tool.value === levelTool)?.label || levelTool}</span>
+        <span className="level-status-pill level-layer-pill" title={activeLayer?.name || t('noLayer')}>{t('layer')}: {activeLayer?.name || '—'}</span>
+        <span className={`level-status-pill level-dirty-pill ${isDirty ? 'dirty' : 'clean'}`}>
+          {isDirty ? t('unsavedChanges') : t('saved')}
+        </span>
+        {lastSavedAt && <span className="level-status-pill level-last-save-pill">{t('lastSave')} {new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+        <span className="level-status-pill level-coordinate-pill">X {cursorCell.x} · Y {cursorCell.y}</span>
+        <span className="level-status-pill">Zoom {Math.round(cellPx / Math.max(1, tileSize) * 100)}%</span>
+        {levelNotice && <span className="level-status-pill level-status-notice">{levelNotice}</span>}
+      </div>
       <div className="level-toolbar-group level-toolbar-primary">
         <Btn size="sm" variant="primary" icon="save" onClick={saveCurrentLevel} disabled={!!activeLevelId && !isDirty}>
           {activeLevelId ? t('save') : t('saveLevel')}
@@ -1222,17 +1233,6 @@ export function LevelsWorkspace({
       </aside>
 
       <section className="level-canvas-shell">
-        <div className="level-status-bar">
-          <span className="level-status-pill">{levelToolOptions.find(tool => tool.value === levelTool)?.label || levelTool}</span>
-          <span className="level-status-pill" title={activeLayer?.name || t('noLayer')}>{t('layer')}: {activeLayer?.name || '—'}</span>
-          <span className={`level-status-pill level-dirty-pill ${isDirty ? 'dirty' : 'clean'}`}>
-            {isDirty ? t('unsavedChanges') : t('saved')}
-          </span>
-          {lastSavedAt && <span className="level-status-pill">{t('lastSave')} {new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
-          <span className="level-status-pill level-coordinate-pill">X {cursorCell.x} · Y {cursorCell.y}</span>
-          <span className="level-status-pill">Zoom {Math.round(cellPx / Math.max(1, tileSize) * 100)}%</span>
-          {levelNotice && <span className="level-status-pill level-status-notice">{levelNotice}</span>}
-        </div>
         <button className="sidebar-toggle" onClick={() => setSidebarOpen(o => !o)} title={sidebarOpen ? 'Hide panel' : 'Show panel'}>
           {sidebarOpen ? '>' : '<'}
         </button>

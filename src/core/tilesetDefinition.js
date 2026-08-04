@@ -1,5 +1,4 @@
-import { generateAllBiomeTiles, generateTilesFromTextures } from './proceduralGen.js'
-import { generateSpriteCookTiles } from './spritecookGen.js'
+import { generateBiomeTiles, generateTilesFromTextures } from './proceduralGen.js'
 import { generateAllTiles } from './tileGenerator.js'
 import { downscaleRgba } from './imageResize.js'
 import { BIOME_MAP, BIOMES } from '../constants/biomes.js'
@@ -82,8 +81,7 @@ function baseTilesFromDefinition(def, tileSize) {
   }
   const base = BIOME_MAP[def?.biomeId] || BIOMES[0]
   const biome = { ...base, colors: { ...base.colors, ...(def?.colors || {}) } }
-  if (biome.proceduralParams?.engine === "spritecook") return generateSpriteCookTiles(biome, tileSize);
-  return generateAllBiomeTiles(biome, tileSize)
+  return generateBiomeTiles(biome, tileSize)
 }
 
 function computeTilesFromDefinition(def, tileSize) {
@@ -127,7 +125,7 @@ function computeFramesFromDefinition(def, tileSize) {
   const biome = { ...base, colors: { ...base.colors, ...(def.colors || {}) } }
   const overrides = decodeDefinitionOverrides(def)
   return Array.from({ length: count - 1 }, (_, f) => {
-    const tiles = biome.proceduralParams?.engine === "spritecook" ? generateSpriteCookTiles(biome, tileSize, f + 1) : generateAllBiomeTiles(biome, tileSize, f + 1)
+    const tiles = generateBiomeTiles(biome, tileSize, f + 1)
     return overrides ? applyTileOverrides(tiles, overrides, tileSize) : tiles
   })
 }

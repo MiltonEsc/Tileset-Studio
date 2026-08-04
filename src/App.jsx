@@ -27,8 +27,8 @@ import {
   tilesFromDefinition, applyTileOverrides, decodeDefinitionOverrides,
   framesFromDefinition, MAX_ANIM_FRAMES,
 } from './core/tilesetDefinition.js'
-import { generateAllBiomeTiles } from './core/proceduralGen.js'
-import { autotileModeForDefinition } from './core/autotile.js'
+import { generateBiomeTiles } from './core/proceduralGen.js'
+import { isAutotileDefinition } from './core/autotile.js'
 
 function cloneColors(colors) {
   return {
@@ -316,7 +316,7 @@ export default function App({ auth = null }) {
     const base = BIOME_MAP[editorTileset.biomeId] || BIOMES[0]
     const biome = { ...base, colors: cloneColors(editorTileset.colors) }
     return Array.from({ length: animFrameCount - 1 }, (_, f) =>
-      applyTileOverrides(generateAllBiomeTiles(biome, tileSize, f + 1), tileOverrides, tileSize))
+      applyTileOverrides(generateBiomeTiles(biome, tileSize, f + 1), tileOverrides, tileSize))
   }, [animFrameCount, mode, aiTextures, editorTileset.biomeId, editorTileset.colors, tileSize, tileOverrides])
   const editorLayerTile = useMemo(
     () => ({ tiles: displayTiles, tileSize, frames: editorAnimFrames, smooth: editorTileset.smooth || false }),
@@ -473,7 +473,12 @@ export default function App({ auth = null }) {
       tilesheet.generateFromTextures(centerData, edgeData, size, palette, aiTextures.smooth || false)
     } else {
       const base = BIOME_MAP[editorTileset.biomeId] || BIOMES[0]
-      tilesheet.generateFromBiome({ ...base, label: editorTileset.name, colors: cloneColors(palette) }, size)
+      tilesheet.generateFromBiome({
+        ...base,
+        label: editorTileset.name,
+        colors: cloneColors(palette),
+        proceduralParams: { ...(base.proceduralParams || {}), ...(editorTileset.proceduralParams || {}) },
+      }, size)
     }
   }
 
@@ -541,7 +546,12 @@ export default function App({ auth = null }) {
       tilesheet.generateFromTextures(centerData, edgeData, tileSize, editorTileset.colors, aiTextures.smooth || false)
     } else {
       const base = BIOME_MAP[editorTileset.biomeId] || BIOMES[0]
-      tilesheet.generateFromBiome({ ...base, label: editorTileset.name, colors: cloneColors(editorTileset.colors) }, tileSize)
+      tilesheet.generateFromBiome({
+        ...base,
+        label: editorTileset.name,
+        colors: cloneColors(editorTileset.colors),
+        proceduralParams: { ...(base.proceduralParams || {}), ...(editorTileset.proceduralParams || {}) },
+      }, tileSize)
     }
   }
 
@@ -698,8 +708,14 @@ export default function App({ auth = null }) {
       biomeId: editorTileset.biomeId,
       label: editorTileset.name,
       colors: cloneColors(inferred),
+      proceduralParams: { ...(base.proceduralParams || {}), ...(editorTileset.proceduralParams || {}) },
     })
-    tilesheet.generateFromBiome({ ...base, label: editorTileset.name, colors: cloneColors(inferred) }, tileSize)
+    tilesheet.generateFromBiome({
+      ...base,
+      label: editorTileset.name,
+      colors: cloneColors(inferred),
+      proceduralParams: { ...(base.proceduralParams || {}), ...(editorTileset.proceduralParams || {}) },
+    }, tileSize)
   }, [tileSize, tilesheet, editorTileset, clearTileOverrides])
 
   const currentTilesetDefinition = useCallback(() => {
@@ -851,10 +867,19 @@ export default function App({ auth = null }) {
     tilesets.save({ name, tileSize, definition: currentTilesetDefinition() })
   }, [tilesets, tileSize, currentTilesetDefinition])
 
+  const handleUseCurrentTilesetInLevel = useCallback(() => {
+    const definition = currentTilesetDefinition()
+    const name = editorTileset.name || definition.label || 'Procedural tileset'
+    level.addLayer({ name, tileSize, definition }, 'autotile')
+    setLevelMode('autotile')
+    setLevelTool('terrain')
+    setActiveView('level')
+    showLevelNotice(`â€œ${name}â€ is ready on a new autotile layer using the current editor sheet.`)
+  }, [currentTilesetDefinition, editorTileset.name, level, tileSize, showLevelNotice])
+
   const handleUseSpriteCookInLevel = useCallback(({ name, tileSize: sourceTileSize, definition, savedId = null }) => {
     if (sourceTileSize !== tileSize) handleTileSizeChange(sourceTileSize)
-    const autotileMode = autotileModeForDefinition(definition)
-    const layerKind = autotileMode === 'dual-grid-15' || autotileMode === 'cardinal-17' ? 'autotile' : 'manual'
+    const layerKind = isAutotileDefinition(definition) ? 'autotile' : 'manual'
     level.addLayer({ name, tileSize: sourceTileSize, definition, ...(savedId ? { savedId } : {}) }, layerKind)
     setManualSelectedTile(0)
     setLevelMode(layerKind)
@@ -1445,6 +1470,7 @@ export default function App({ auth = null }) {
           onCancelTileEdit={handleCancelTileEdit} onResetTileOverride={handleResetTileOverride}
           animFrameCount={animFrameCount} setAnimFrameCount={setAnimFrameCount}
           canAnimate={!aiTextures} animFrames={editorAnimFrames}
+          onUseInLevel={handleUseCurrentTilesetInLevel}
           active={showTileset}
         />
       </div>

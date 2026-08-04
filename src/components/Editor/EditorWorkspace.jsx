@@ -11,6 +11,7 @@ import { JsonImportExport } from './JsonImportExport.jsx'
 import { composeNativeSheet } from '../../core/composeSheet.js'
 import { exportTilesheet } from '../../core/exportSheet.js'
 import { ANIM_FRAME_MS } from '../../core/tilesetDefinition.js'
+import { spriteCookDefaultPadding } from '../../core/spritecookGen.js'
 import { useI18n } from '../../i18n.jsx'
 
 // AI panels pull in the Gemini/OpenAI request code; load them only when the
@@ -142,6 +143,7 @@ export function EditorWorkspace({
   editingTile = null, overrideDraw, overriddenTiles = [],
   onEditTile, onApplyTileEdit, onCancelTileEdit, onResetTileOverride,
   animFrameCount = 1, setAnimFrameCount, canAnimate = false, animFrames = null,
+  onUseInLevel = null,
   active = true,
 }) {
   const { t } = useI18n()
@@ -211,8 +213,8 @@ export function EditorWorkspace({
                 
                 {biome.proceduralParams?.engine === 'spritecook' ? (
                   <>
-                    <label className="field-label" style={{ marginTop: 12 }}>Padding</label>
-                    <input type="range" min="0" max={Math.floor(tileSize / 3)} value={biome.proceduralParams?.padding ?? 1} onChange={e => onProceduralParamChange?.('padding', parseInt(e.target.value, 10))} className="slider" />
+                    <label className="field-label" style={{ marginTop: 12 }}>Transparent edge padding</label>
+                    <input type="range" min="0" max={Math.floor(tileSize / 3)} value={biome.proceduralParams?.padding ?? spriteCookDefaultPadding(tileSize)} onChange={e => onProceduralParamChange?.('padding', parseInt(e.target.value, 10))} className="slider" />
                     
                     <label className="field-label" style={{ marginTop: 12 }}>Corner Radius</label>
                     <input type="range" min="0" max={Math.floor(tileSize / 2)} value={biome.proceduralParams?.cornerRadius ?? Math.floor(tileSize * 0.2)} onChange={e => onProceduralParamChange?.('cornerRadius', parseInt(e.target.value, 10))} className="slider" />
@@ -471,9 +473,16 @@ export function EditorWorkspace({
               <Btn variant="primary" size="lg" icon="save" onClick={onApplyTileEdit}>Apply tile</Btn>
             </>
           ) : (
-            <Btn variant="primary" size="lg" icon="grid" onClick={onGenerate}>
-              {mode === 'draw' ? 'Generate from drawing' : 'Generate procedural'}
-            </Btn>
+            <>
+              <Btn variant="primary" size="lg" icon="grid" onClick={onGenerate}>
+                {mode === 'draw' ? 'Generate from drawing' : 'Generate procedural'}
+              </Btn>
+              {mode === 'procedural' && onUseInLevel && (
+                <Btn variant="outline" size="lg" icon="layers" onClick={onUseInLevel}>
+                  Use in level editor
+                </Btn>
+              )}
+            </>
           )}
         </div>
       </main>
